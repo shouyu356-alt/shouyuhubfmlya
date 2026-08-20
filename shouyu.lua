@@ -1,28 +1,30 @@
--- Shouyuhub Ultimate Edition
+-- Shouyuhub Speed & Teleport Edition
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local StarterGui = game:GetService("StarterGui")
-local TeleportService = game:GetService("TeleportService")
+local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
 local pgui = player:WaitForChild("PlayerGui")
 
 -- 既存UIのクリーンアップ
 for _, v in pairs(pgui:GetChildren()) do
-    if v.Name == "Shouyuhub_Ultimate_Gui" then
+    if v.Name == "Shouyuhub_Teleport_Gui" then
         v:Destroy()
     end
 end
 
 local config = {
-    SpeedValue = 220,
+    SpeedValue = 250,       -- 超高速移動
     SpeedHack = false,
-    AutoSteer = false,      -- 動画のような超高速オートスティール
     Fly = false,
-    FlySpeed = 60,
-    Underground = false,    -- 地面に埋まる（リスポーン防止）
-    Noclip = false
+    FlySpeed = 70,
+    Noclip = false,
+    Underground = false     -- 地面に埋まる防止
 }
+
+-- 基地の位置を保存するための変数
+local basePosition = nil
 
 local function notify(title, text)
     pcall(function()
@@ -35,7 +37,7 @@ local function notify(title, text)
 end
 
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "Shouyuhub_Ultimate_Gui"
+ScreenGui.Name = "Shouyuhub_Teleport_Gui"
 ScreenGui.Parent = pgui
 ScreenGui.ResetOnSpawn = false
 
@@ -55,8 +57,8 @@ ToggleCorner.Parent = ToggleBtn
 
 -- メインフレーム
 local MainFrame = Instance.new("Frame")
-MainFrame.Size = UDim2.new(0, 440, 0, 300)
-MainFrame.Position = UDim2.new(0.5, -220, 0.5, -150)
+MainFrame.Size = UDim2.new(0, 420, 0, 280)
+MainFrame.Position = UDim2.new(0.5, -210, 0.5, -140)
 MainFrame.BackgroundColor3 = Color3.fromRGB(16, 14, 22)
 MainFrame.BorderSizePixel = 0
 MainFrame.Active = true
@@ -98,16 +100,16 @@ local Scroll = Instance.new("ScrollingFrame")
 Scroll.Size = UDim2.new(1, -16, 1, -45)
 Scroll.Position = UDim2.new(0, 8, 0, 40)
 Scroll.BackgroundTransparency = 1
-Scroll.CanvasSize = UDim2.new(0, 0, 0, 340)
+Scroll.CanvasSize = UDim2.new(0, 0, 0, 300)
 Scroll.ScrollBarThickness = 4
 Scroll.Parent = MainFrame
 
-local function createToggle(text, yPos, key)
+local function createButton(text, yPos, callback)
     local btn = Instance.new("TextButton")
     btn.Size = UDim2.new(1, 0, 0, 36)
     btn.Position = UDim2.new(0, 0, 0, yPos)
     btn.BackgroundColor3 = Color3.fromRGB(32, 27, 45)
-    btn.Text = text .. " : OFF"
+    btn.Text = text
     btn.TextColor3 = Color3.new(1, 1, 1)
     btn.Font = Enum.Font.GothamMedium
     btn.TextSize = 12
@@ -117,64 +119,57 @@ local function createToggle(text, yPos, key)
     c.CornerRadius = UDim.new(0, 6)
     c.Parent = btn
 
-    btn.MouseButton1Click:Connect(function()
-        config[key] = not config[key]
-        local state = config[key]
-        btn.Text = text .. " : " .. (state and "ON" or "OFF")
-        btn.BackgroundColor3 = state and Color3.fromRGB(100, 45, 180) or Color3.fromRGB(32, 27, 45)
-    end)
+    btn.MouseButton1Click:Connect(callback)
+    return btn
 end
 
--- 各種機能の配置
-createToggle("🎯 オートスティール (自動盗み)", 0, "AutoSteer")
-createToggle("🛡️ 地面に埋まる (リスポーン防止)", 44, "Underground")
-createToggle("⚡ スピードハック", 88, "SpeedHack")
-createToggle("✈️ 飛行 (Fly)", 132, "Fly")
-createToggle("👻 壁抜け (Noclip)", 176, "Noclip")
-
--- 速度変更ボタン
-local SpeedBtn = Instance.new("TextButton")
-SpeedBtn.Size = UDim2.new(1, 0, 0, 36)
-SpeedBtn.Position = UDim2.new(0, 0, 0, 220)
-SpeedBtn.BackgroundColor3 = Color3.fromRGB(32, 27, 45)
-SpeedBtn.Text = "移動速度切替 (現在: 220)"
-SpeedBtn.TextColor3 = Color3.new(1, 1, 1)
-SpeedBtn.Font = Enum.Font.GothamMedium
-SpeedBtn.TextSize = 12
-SpeedBtn.Parent = Scroll
-
-local sc = Instance.new("UICorner")
-sc.CornerRadius = UDim.new(0, 6)
-sc.Parent = SpeedBtn
-
-SpeedBtn.MouseButton1Click:Connect(function()
-    if config.SpeedValue == 220 then config.SpeedValue = 150
-    elseif config.SpeedValue == 150 then config.SpeedValue = 90
-    else config.SpeedValue = 220 end
-    SpeedBtn.Text = "移動速度切替 (現在: " .. config.SpeedValue .. ")"
+-- 1. 基地の場所をセーブするボタン
+local SetBaseBtn = createButton("📍 現在地を「自分の基地」として記憶", 0, function()
+    local char = player.Character
+    if char and char:FindFirstChild("HumanoidRootPart") then
+        basePosition = char.HumanoidRootPart.CFrame
+        notify("Shouyuhub", "現在の位置を基地として保存しました！")
+    end
 end)
 
--- 再参加ボタン
-local RejoinBtn = Instance.new("TextButton")
-RejoinBtn.Size = UDim2.new(1, 0, 0, 36)
-RejoinBtn.Position = UDim2.new(0, 0, 0, 264)
-RejoinBtn.BackgroundColor3 = Color3.fromRGB(55, 30, 75)
-RejoinBtn.Text = "サーバー再参加 (Rejoin)"
-RejoinBtn.TextColor3 = Color3.new(1, 1, 1)
-RejoinBtn.Font = Enum.Font.GothamMedium
-RejoinBtn.TextSize = 12
-RejoinBtn.Parent = Scroll
-
-local rc = Instance.new("UICorner")
-rc.CornerRadius = UDim.new(0, 6)
-rc.Parent = RejoinBtn
-
-RejoinBtn.MouseButton1Click:Connect(function()
-    task.wait(0.3)
-    pcall(function() TeleportService:Teleport(game.PlaceId, player) end)
+-- 2. 基地へ瞬間移動するボタン（シュッと戻る用）
+local TpBaseBtn = createButton("🏠 基地へ瞬間テレポート (シュッ！)", 44, function()
+    if basePosition then
+        local char = player.Character
+        if char and char:FindFirstChild("HumanoidRootPart") then
+            char.HumanoidRootPart.CFrame = basePosition
+            notify("Shouyuhub", "基地へテレポートしました！")
+        end
+    else
+        notify("Shouyuhub", "先に「基地を記憶」してください！")
+    end
 end)
 
--- メインの動作ループ
+-- 3. スピードハック切り替え
+local speedStateBtn
+speedStateBtn = createButton("⚡ スピードハック : OFF", 88, function()
+    config.SpeedHack = not config.SpeedHack
+    speedStateBtn.Text = "⚡ スピードハック : " .. (config.SpeedHack and "ON" or "OFF")
+    speedStateBtn.BackgroundColor3 = config.SpeedHack and Color3.fromRGB(100, 45, 180) or Color3.fromRGB(32, 27, 45)
+end)
+
+-- 4. 飛行 (Fly)
+local flyStateBtn
+flyStateBtn = createButton("✈️ 飛行 (Fly) : OFF", 132, function()
+    config.Fly = not config.Fly
+    flyStateBtn.Text = "✈️ 飛行 (Fly) : " .. (config.Fly and "ON" or "OFF")
+    flyStateBtn.BackgroundColor3 = config.Fly and Color3.fromRGB(100, 45, 180) or Color3.fromRGB(32, 27, 45)
+end)
+
+-- 5. 壁抜け (Noclip)
+local noclipStateBtn
+noclipStateBtn = createButton("👻 壁抜け (Noclip) : OFF", 176, function()
+    config.Noclip = not config.Noclip
+    noclipStateBtn.Text = "👻 壁抜け (Noclip) : " .. (config.Noclip and "ON" or "OFF")
+    noclipStateBtn.BackgroundColor3 = config.Noclip and Color3.fromRGB(100, 45, 180) or Color3.fromRGB(32, 27, 45)
+end)
+
+-- メインの動作ループ（高速移動・飛行・壁抜け）
 RunService.Heartbeat:Connect(function()
     local char = player.Character
     if not char then return end
@@ -184,11 +179,6 @@ RunService.Heartbeat:Connect(function()
 
     if config.SpeedHack then
         humanoid.WalkSpeed = config.SpeedValue
-    end
-
-    if config.Underground then
-        rootPart.CFrame = rootPart.CFrame - Vector3.new(0, 5, 0)
-        rootPart.Velocity = Vector3.new(0, 0, 0)
     end
 
     if config.Noclip then
@@ -209,27 +199,4 @@ RunService.Heartbeat:Connect(function()
     end
 end)
 
--- 超高速オートスティール処理（動画の動きを完全再現）
-RunService.Stepped:Connect(function()
-    if not config.AutoSteer then return end
-    local char = player.Character
-    if not char then return end
-    local rootPart = char:FindFirstChild("HumanoidRootPart")
-    if not rootPart then return end
-
-    pcall(function()
-        for _, obj in pairs(workspace:GetDescendants()) do
-            if obj:IsA("ProximityPrompt") then
-                local parentPart = obj.Parent
-                if parentPart and parentPart:IsA("BasePart") then
-                    if (rootPart.Position - parentPart.Position).Magnitude <= (obj.MaxActivationDistance + 20) then
-                        fireproximityprompt(obj)
-                    end
-                end
-            end
-        end
-    end)
-end)
-
-notify("Shouyuhub", "最高の状態にアップデートしました！")
-
+notify("Shouyuhub", "高速移動＆基地テレポート版をロードしました！")
