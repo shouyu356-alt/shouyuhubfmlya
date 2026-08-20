@@ -1,207 +1,330 @@
--- Shouyu Hub Fmly v2.0 - NeoHub Complete Edition
+-- Shouyu Hub Fmly v1.0
+-- 完全自己完結型・外部URL不要・Delta対応
+
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local StarterGui = game:GetService("StarterGui")
 
 local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
+local rootPart = character:WaitForChild("HumanoidRootPart")
 
+-- 設定
 local config = {
     SpeedHack = false,
     SpeedValue = 16,
-    AutoSteer = false,
-    Underground = false,
+    InfJump = false,
+    Noclip = false,
+    ESP = false,
+    Fly = false,
+    FlySpeed = 100,
+    AutoFarm = false,
+    WallHack = false,
+    Aimbot = false,
+    Teleport = false,
     GodMode = false
 }
 
--- メインGUI作成
+-- GUI 作成
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "SH_NeoHub_Complete_" .. math.random(1000, 9999)
+ScreenGui.Name = "ShouyuHub"
 ScreenGui.Parent = player:WaitForChild("PlayerGui")
 ScreenGui.ResetOnSpawn = false
 
--- 開閉用フロートアイコン (NeoHub風)
-local ToggleButtonIcon = Instance.new("TextButton")
-ToggleButtonIcon.Size = UDim2.new(0, 45, 0, 45)
-ToggleButtonIcon.Position = UDim2.new(0, 15, 0.4, 0)
-ToggleButtonIcon.BackgroundColor3 = Color3.fromRGB(20, 18, 25)
-ToggleButtonIcon.Text = "⚡"
-ToggleButtonIcon.TextColor3 = Color3.fromRGB(200, 130, 255)
-ToggleButtonIcon.TextSize = 22
-ToggleButtonIcon.Parent = ScreenGui
-
-local IconCorner = Instance.new("UICorner")
-IconCorner.CornerRadius = UDim.new(1, 0)
-IconCorner.Parent = ToggleButtonIcon
-
--- メインウィンドウ (NeoHubスタイル)
 local MainFrame = Instance.new("Frame")
-MainFrame.Size = UDim2.new(0, 440, 0, 360)
-MainFrame.Position = UDim2.new(0.5, -220, 0.5, -180)
-MainFrame.BackgroundColor3 = Color3.fromRGB(15, 14, 20)
+MainFrame.Size = UDim2.new(0, 350, 0, 600)
+MainFrame.Position = UDim2.new(0.5, -175, 0.5, -300)
+MainFrame.BackgroundColor3 = Color3.fromRGB(20, 15, 25)
 MainFrame.BorderSizePixel = 0
 MainFrame.Active = true
 MainFrame.Draggable = true
 MainFrame.Parent = ScreenGui
 
-ToggleButtonIcon.MouseButton1Click:Connect(function()
-    MainFrame.Visible = not MainFrame.Visible
-end)
-
-local MainCorner = Instance.new("UICorner")
-MainCorner.CornerRadius = UDim.new(0, 8)
-MainCorner.Parent = MainFrame
-
--- トップバー
-local TopBar = Instance.new("Frame")
-TopBar.Size = UDim2.new(1, 0, 0, 36)
-TopBar.BackgroundColor3 = Color3.fromRGB(25, 22, 35)
-TopBar.BorderSizePixel = 0
-TopBar.Parent = MainFrame
-
-local TopBarCorner = Instance.new("UICorner")
-TopBarCorner.CornerRadius = UDim.new(0, 8)
-TopBarCorner.Parent = TopBar
+local UICorner = Instance.new("UICorner")
+UICorner.CornerRadius = UDim.new(0, 10)
+UICorner.Parent = MainFrame
 
 local Title = Instance.new("TextLabel")
-Title.Size = UDim2.new(1, -12, 1, 0)
-Title.Position = UDim2.new(0, 12, 0, 0)
-Title.BackgroundTransparency = 1
-Title.Text = "NEOHUB V2  |  Shouyu Hub Fmly [Brainrot Edition]"
-Title.TextColor3 = Color3.fromRGB(200, 140, 255)
+Title.Size = UDim2.new(1, 0, 0, 50)
+Title.BackgroundColor3 = Color3.fromRGB(40, 25, 50)
+Title.Text = "Shouyu Hub Fmly"
+Title.TextColor3 = Color3.fromRGB(255, 150, 0)
 Title.Font = Enum.Font.GothamBold
-Title.TextSize = 12
-Title.TextXAlignment = Enum.TextXAlignment.Left
-Title.Parent = TopBar
+Title.TextSize = 22
+Title.Parent = MainFrame
 
--- フッター
-local Footer = Instance.new("Frame")
-Footer.Size = UDim2.new(1, 0, 0, 26)
-Footer.Position = UDim2.new(0, 0, 1, -26)
-Footer.BackgroundColor3 = Color3.fromRGB(12, 11, 16)
-Footer.BorderSizePixel = 0
-Footer.Parent = MainFrame
-
-local FooterText = Instance.new("TextLabel")
-FooterText.Size = UDim2.new(1, -12, 1, 0)
-FooterText.Position = UDim2.new(0, 12, 0, 0)
-FooterText.BackgroundTransparency = 1
-FooterText.Text = "Status: Online | Mode: Auto-Steal & Underground"
-FooterText.TextColor3 = Color3.fromRGB(110, 110, 125)
-FooterText.Font = Enum.Font.Code
-FooterText.TextSize = 10
-FooterText.TextXAlignment = Enum.TextXAlignment.Left
-FooterText.Parent = Footer
-
--- スクロールコンテンツエリア
-local ContentArea = Instance.new("ScrollingFrame")
-ContentArea.Size = UDim2.new(1, -10, 1, -70)
-ContentArea.Position = UDim2.new(0, 5, 0, 40)
-ContentArea.BackgroundTransparency = 1
-ContentArea.CanvasSize = UDim2.new(0, 0, 0, 320)
-ContentArea.ScrollBarThickness = 4
-ContentArea.Parent = MainFrame
-
--- トグルボタン生成関数
+-- トグルボタン作成関数
 local function createToggle(text, yPos, settingKey)
-    local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(0.95, 0, 0, 35)
-    btn.Position = UDim2.new(0.025, 0, 0, yPos)
-    btn.BackgroundColor3 = Color3.fromRGB(30, 27, 40)
-    btn.Text = text .. " : OFF"
-    btn.TextColor3 = Color3.new(1, 1, 1)
-    btn.Font = Enum.Font.GothamMedium
-    btn.TextSize = 13
-    btn.Parent = ContentArea
+    local ToggleButton = Instance.new("TextButton")
+    ToggleButton.Size = UDim2.new(0.9, 0, 0, 40)
+    ToggleButton.Position = UDim2.new(0.05, 0, 0, yPos)
+    ToggleButton.BackgroundColor3 = Color3.fromRGB(60, 45, 70)
+    ToggleButton.Text = text .. ": OFF"
+    ToggleButton.TextColor3 = Color3.new(1, 1, 1)
+    ToggleButton.Font = Enum.Font.Gotham
+    ToggleButton.TextSize = 15
+    ToggleButton.Parent = MainFrame
     
-    local c = Instance.new("UICorner")
-    c.CornerRadius = UDim.new(0, 6)
-    c.Parent = btn
+    local ToggleCorner = Instance.new("UICorner")
+    ToggleCorner.CornerRadius = UDim.new(0, 5)
+    ToggleCorner.Parent = ToggleButton
     
-    btn.MouseButton1Click:Connect(function()
+    ToggleButton.MouseButton1Click:Connect(function()
         config[settingKey] = not config[settingKey]
-        btn.Text = text .. " : " .. (config[settingKey] and "ON" or "OFF")
-        btn.BackgroundColor3 = config[settingKey] and Color3.fromRGB(90, 40, 160) or Color3.fromRGB(30, 27, 40)
+        ToggleButton.Text = text .. ": " .. (config[settingKey] and "ON" or "OFF")
+        ToggleButton.BackgroundColor3 = config[settingKey] and Color3.fromRGB(0, 150, 0) or Color3.fromRGB(60, 45, 70)
     end)
 end
 
--- 各機能の配置
-createToggle("スピードアップ (WalkSpeed)", 10, "SpeedHack")
-createToggle("オートスティール (Auto Steal)", 52, "AutoSteer")
-createToggle("地面に埋まる (Underground)", 94, "Underground")
-createToggle("無敵 (God Mode)", 136, "GodMode")
+-- ボタン配置
+createToggle("スピードハック", 60, "SpeedHack")
+createToggle("無限ジャンプ", 105, "InfJump")
+createToggle("Noclip", 150, "Noclip")
+createToggle("ESP", 195, "ESP")
+createToggle("飛行モード", 240, "Fly")
+createToggle("自動ファーム", 285, "AutoFarm")
+createToggle("ウォールハック", 330, "WallHack")
+createToggle("エイムボット", 375, "Aimbot")
+createToggle("テレポート", 420, "Teleport")
+createToggle("ゴッドモード", 465, "GodMode")
 
--- 速度調整ボタン
-local SpeedBtn = Instance.new("TextButton")
-SpeedBtn.Size = UDim2.new(0.95, 0, 0, 35)
-SpeedBtn.Position = UDim2.new(0.025, 0, 0, 178)
-SpeedBtn.BackgroundColor3 = Color3.fromRGB(30, 27, 40)
-SpeedBtn.Text = "速度調整 (現在: 16)"
-SpeedBtn.TextColor3 = Color3.new(1, 1, 1)
-SpeedBtn.Font = Enum.Font.GothamMedium
-SpeedBtn.TextSize = 13
-SpeedBtn.Parent = ContentArea
+-- 速度調整
+local SpeedButton = Instance.new("TextButton")
+SpeedButton.Size = UDim2.new(0.9, 0, 0, 40)
+SpeedButton.Position = UDim2.new(0.05, 0, 0, 510)
+SpeedButton.BackgroundColor3 = Color3.fromRGB(60, 45, 70)
+SpeedButton.Text = "速度: 16"
+SpeedButton.TextColor3 = Color3.new(1, 1, 1)
+SpeedButton.Font = Enum.Font.Gotham
+SpeedButton.TextSize = 15
+SpeedButton.Parent = MainFrame
 
-local sc = Instance.new("UICorner")
-sc.CornerRadius = UDim.new(0, 6)
-sc.Parent = SpeedBtn
+local SpeedCorner = Instance.new("UICorner")
+SpeedCorner.CornerRadius = UDim.new(0, 5)
+SpeedCorner.Parent = SpeedButton
 
-SpeedBtn.MouseButton1Click:Connect(function()
-    config.SpeedValue = config.SpeedValue + 10
-    if config.SpeedValue > 100 then config.SpeedValue = 16 end
-    SpeedBtn.Text = "速度調整 (現在: " .. config.SpeedValue .. ")"
+SpeedButton.MouseButton1Click:Connect(function()
+    config.SpeedValue = config.SpeedValue + 5
+    if config.SpeedValue > 200 then config.SpeedValue = 16 end
+    SpeedButton.Text = "速度: " .. config.SpeedValue
 end)
 
--- --- 機能の処理ロジック (軽量化・最適化済み) ---
+-- 飛行速度調整
+local FlySpeedButton = Instance.new("TextButton")
+FlySpeedButton.Size = UDim2.new(0.9, 0, 0, 40)
+FlySpeedButton.Position = UDim2.new(0.05, 0, 0, 555)
+FlySpeedButton.BackgroundColor3 = Color3.fromRGB(60, 45, 70)
+FlySpeedButton.Text = "飛行速度: 100"
+FlySpeedButton.TextColor3 = Color3.new(1, 1, 1)
+FlySpeedButton.Font = Enum.Font.Gotham
+FlySpeedButton.TextSize = 15
+FlySpeedButton.Parent = MainFrame
 
+local FlySpeedCorner = Instance.new("UICorner")
+FlySpeedCorner.CornerRadius = UDim.new(0, 5)
+FlySpeedCorner.Parent = FlySpeedButton
+
+FlySpeedButton.MouseButton1Click:Connect(function()
+    config.FlySpeed = config.FlySpeed + 10
+    if config.FlySpeed > 300 then config.FlySpeed = 50 end
+    FlySpeedButton.Text = "飛行速度: " .. config.FlySpeed
+end)
+
+-- 機能実装
+local bodyVelocity = nil
+local flying = false
+
+-- スピードハック
 RunService.RenderStepped:Connect(function()
-    local char = player.Character
-    if not char then return end
-    local humanoid = char:FindFirstChildOfClass("Humanoid")
-    local rootPart = char:FindFirstChild("HumanoidRootPart")
-    if not humanoid or not rootPart then return end
-
-    -- スピード調整
     if config.SpeedHack then
         humanoid.WalkSpeed = config.SpeedValue
     else
         humanoid.WalkSpeed = 16
     end
+end)
 
-    -- 無敵 (ゴッドモード)
-    if config.GodMode then
-        humanoid.Health = humanoid.MaxHealth
-    end
-
-    -- 地面に埋まる (少しだけ下に座標を移動させる)
-    if config.Underground then
-        rootPart.CFrame = rootPart.CFrame - Vector3.new(0, 4.5, 0)
+-- 無限ジャンプ
+UserInputService.JumpRequest:Connect(function()
+    if config.InfJump then
+        humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+        task.wait(0.1)
+        humanoid:ChangeState(Enum.HumanoidStateType.Freefall)
     end
 end)
 
--- オートスティール（周囲のプレイヤーに自動接近する軽量処理）
+-- Noclip
 RunService.Stepped:Connect(function()
-    if config.AutoSteer then
-        local char = player.Character
-        if not char then return end
-        local rootPart = char:FindFirstChild("HumanoidRootPart")
-        if not rootPart then return end
+    if config.Noclip then
+        for _, part in pairs(character:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.CanCollide = false
+            end
+        end
+    end
+end)
 
+-- 飛行
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == Enum.KeyCode.F and config.Fly then
+        flying = not flying
+        if flying then
+            bodyVelocity = Instance.new("BodyVelocity")
+            bodyVelocity.MaxForce = Vector3.new(1e6, 1e6, 1e6)
+            bodyVelocity.Parent = rootPart
+        else
+            if bodyVelocity then
+                bodyVelocity:Destroy()
+                bodyVelocity = nil
+            end
+        end
+    end
+end)
+
+RunService.RenderStepped:Connect(function()
+    if flying and bodyVelocity then
+        local camera = workspace.CurrentCamera
+        local moveDir = Vector3.new()
+        
+        if UserInputService:IsKeyDown(Enum.KeyCode.W) then moveDir = moveDir + camera.CFrame.LookVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.S) then moveDir = moveDir - camera.CFrame.LookVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.A) then moveDir = moveDir - camera.CFrame.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.D) then moveDir = moveDir + camera.CFrame.RightVector end
+        if UserInputService:IsKeyDown(Enum.KeyCode.Space) then moveDir = moveDir + Vector3.new(0, 1, 0) end
+        if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then moveDir = moveDir - Vector3.new(0, 1, 0) end
+        
+        if moveDir.Magnitude > 0 then
+            moveDir = moveDir.Unit * config.FlySpeed
+        end
+        bodyVelocity.Velocity = moveDir
+    end
+end)
+
+-- ESP
+local function createESP(targetPlayer)
+    local targetChar = targetPlayer.Character
+    if not targetChar then return end
+    local targetRoot = targetChar:WaitForChild("HumanoidRootPart")
+    
+    local BillboardGui = Instance.new("BillboardGui")
+    BillboardGui.Size = UDim2.new(0, 100, 0, 30)
+    BillboardGui.Adornee = targetRoot
+    BillboardGui.AlwaysOnTop = true
+    
+    local TextLabel = Instance.new("TextLabel")
+    TextLabel.Size = UDim2.new(1, 0, 1, 0)
+    TextLabel.BackgroundTransparency = 1
+    TextLabel.Text = targetPlayer.Name
+    TextLabel.TextColor3 = Color3.fromRGB(255, 0, 0)
+    TextLabel.TextStrokeTransparency = 0
+    TextLabel.Font = Enum.Font.GothamBold
+    TextLabel.TextSize = 14
+    TextLabel.Parent = BillboardGui
+    
+    BillboardGui.Parent = targetRoot
+end
+
+Players.PlayerAdded:Connect(function(plr)
+    plr.CharacterAdded:Connect(function()
+        if config.ESP then createESP(plr) end
+    end)
+end)
+
+for _, plr in pairs(Players:GetPlayers()) do
+    if plr ~= player then
+        plr.CharacterAdded:Connect(function()
+            if config.ESP then createESP(plr) end
+        end)
+    end
+end
+
+-- 自動ファーム
+RunService.RenderStepped:Connect(function()
+    if config.AutoFarm and rootPart then
         for _, plr in pairs(Players:GetPlayers()) do
-            if plr ~= player and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") then
-                local targetRoot = plr.Character.HumanoidRootPart
-                local dist = (rootPart.Position - targetRoot.Position).Magnitude
-                if dist < 40 and dist > 4 then
-                    rootPart.CFrame = CFrame.new(targetRoot.Position + Vector3.new(0, 2, 0))
+            if plr ~= player and plr.Character and plr.Character:FindFirstChild("Humanoid") then
+                local targetHumanoid = plr.Character.Humanoid
+                local distance = (rootPart.Position - plr.Character.HumanoidRootPart.Position).Magnitude
+                if distance < 20 then
+                    targetHumanoid:TakeDamage(5)
                 end
             end
         end
     end
 end)
 
--- 起動通知
+-- ウォールハック
+RunService.RenderStepped:Connect(function()
+    if config.WallHack then
+        for _, plr in pairs(Players:GetPlayers()) do
+            if plr ~= player and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") then
+                local targetRoot = plr.Character.HumanoidRootPart
+                local highlight = targetRoot:FindFirstChild("Highlight")
+                if not highlight then
+                    local newHighlight = Instance.new("Highlight")
+                    newHighlight.FillColor = Color3.fromRGB(255, 150, 0)
+                    newHighlight.OutlineColor = Color3.fromRGB(255, 255, 255)
+                    newHighlight.FillTransparency = 0.5
+                    newHighlight.Parent = targetRoot
+                end
+            end
+        end
+    end
+end)
+
+-- エイムボット
+RunService.RenderStepped:Connect(function()
+    if config.Aimbot then
+        local nearestPlayer = nil
+        local nearestDistance = math.huge
+        
+        for _, plr in pairs(Players:GetPlayers()) do
+            if plr ~= player and plr.Character and plr.Character:FindFirstChild("HumanoidRootPart") then
+                local targetRoot = plr.Character.HumanoidRootPart
+                local distance = (rootPart.Position - targetRoot.Position).Magnitude
+                if distance < nearestDistance then
+                    nearestDistance = distance
+                    nearestPlayer = plr
+                end
+            end
+        end
+        
+        if nearestPlayer and nearestPlayer.Character then
+            local targetRoot = nearestPlayer.Character.HumanoidRootPart
+            local camera = workspace.CurrentCamera
+            camera.CFrame = CFrame.new(camera.CFrame.Position, targetRoot.Position)
+        end
+    end
+end)
+
+-- テレポート
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    if input.KeyCode == Enum.KeyCode.T and config.Teleport then
+        local mouse = player:GetMouse()
+        local target = mouse.Hit
+        if target then
+            rootPart.CFrame = target
+        end
+    end
+end)
+
+-- ゴッドモード
+RunService.RenderStepped:Connect(function()
+    if config.GodMode then
+        humanoid.MaxHealth = math.huge
+        humanoid.Health = math.huge
+    else
+        humanoid.MaxHealth = 100
+        humanoid.Health = math.min(humanoid.Health, 100)
+    end
+end)
+
+-- 通知
 StarterGui:SetCore("SendNotification", {
-    Title = "NeoHub x Shouyu",
-    Text = "NeoHubモデルのロードが完了しました！",
+    Title = "Shouyu Hub Fmly",
+    Text = "ロード完了！Fキーで飛行 / Tキーでテレポート",
     Duration = 3
 })
