@@ -1,21 +1,20 @@
--- Shouyuhub Anti-Rubberband Edition
+-- Shouyuhub Anti-Rubberband Ultimate Edition
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local StarterGui = game:GetService("StarterGui")
-local TeleportService = game:GetService("TeleportService")
 
 local player = Players.LocalPlayer
 local pgui = player:WaitForChild("PlayerGui")
 
 -- 既存UIのクリーンアップ
 for _, v in pairs(pgui:GetChildren()) do
-    if v.Name == "Shouyuhub_Stable_Gui" then
+    if v.Name == "Shouyuhub_AntiRubberband_Gui" then
         v:Destroy()
     end
 end
 
 local config = {
-    SpeedValue = 120,       -- 引き戻されにくい安全かつ高速な値に調整
+    SpeedValue = 120,
     SpeedHack = false,
     Fly = false,
     FlySpeed = 60,
@@ -35,7 +34,7 @@ local function notify(title, text)
 end
 
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "Shouyuhub_Stable_Gui"
+ScreenGui.Name = "Shouyuhub_AntiRubberband_Gui"
 ScreenGui.Parent = pgui
 ScreenGui.ResetOnSpawn = false
 
@@ -130,18 +129,25 @@ createButton("📍 現在地を「自分の基地」として記憶", 0, functio
     end
 end)
 
--- 2. 引き戻しを防ぐ安全テレポート機能
+-- 2. サーバーの引き戻しを完全封殺するテレポート
 createButton("🏠 基地へ瞬間テレポート (シュッ！)", 44, function()
     if basePosition then
         local char = player.Character
         if char and char:FindFirstChild("HumanoidRootPart") then
             local root = char:FindFirstChild("HumanoidRootPart")
-            -- 速度を一度ゼロにしてからテレポートし、引き戻しを防止
-            root.Velocity = Vector3.new(0, 0, 0)
-            root.CFrame = basePosition + Vector3.new(0, 2, 0)
-            task.wait(0.05)
-            root.CFrame = basePosition
-            notify("Shouyuhub", "基地に戻りました！")
+            
+            -- サーバーの巻き戻しを相殺するため、数フレームにわたって位置を完全に固定・上書きする
+            task.spawn(function()
+                for i = 1, 15 do
+                    if not char or not root then break end
+                    root.Velocity = Vector3.new(0, 0, 0)
+                    root.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
+                    root.CFrame = basePosition
+                    task.wait()
+                end
+            end)
+            
+            notify("Shouyuhub", "基地へ安全に帰還しました！")
         end
     else
         notify("Shouyuhub", "先に基地を記憶してください！")
@@ -172,7 +178,7 @@ noclipStateBtn = createButton("👻 壁抜け (Noclip) : OFF", 176, function()
     noclipStateBtn.BackgroundColor3 = config.Noclip and Color3.fromRGB(100, 45, 180) or Color3.fromRGB(32, 27, 45)
 end)
 
--- 安定した移動速度・飛行・壁抜けのループ処理
+-- 移動速度・飛行・壁抜けのループ処理
 RunService.Heartbeat:Connect(function()
     local char = player.Character
     if not char then return end
@@ -202,4 +208,4 @@ RunService.Heartbeat:Connect(function()
     end
 end)
 
-notify("Shouyuhub", "安定版にアップデートしました！")
+notify("Shouyuhub", "引き戻し防止版にアップデートしました！")
