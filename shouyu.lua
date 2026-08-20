@@ -1,4 +1,4 @@
--- shouyuhubfmly v4.0 - Auto Steal & Prompt Spammer Edition
+-- -- shouyuhubfmly v5.0 - Final Steal & Underground Edition
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local StarterGui = game:GetService("StarterGui")
@@ -9,10 +9,10 @@ local player = Players.LocalPlayer
 local config = {
     SpeedHack = false,
     SpeedValue = 150,
-    AutoSteer = false,      -- 自動で「盗む」プロンプトを即座に実行する機能
+    AutoSteer = false,      -- 近づいた「盗む」プロンプトやインタラクションを自動で即座に実行
     Fly = false,
     FlySpeed = 60,
-    Underground = false     -- リスポーン防止
+    Underground = false     -- 地面に埋まってリスポーン・攻撃を完全防止
 }
 
 local function notify(title, text)
@@ -240,7 +240,7 @@ local rc = Instance.new("UICorner")
 rc.CornerRadius = UDim.new(0, 6)
 rc.Parent = RejoinBtn
 
-RejoinBtn.MouseButton1Code = RejoinBtn.MouseButton1Click:Connect(function()
+RejoinBtn.MouseButton1Click:Connect(function()
     notify("shouyuhubfmly", "サーバーに再接続中...")
     task.wait(0.3)
     pcall(function()
@@ -248,7 +248,7 @@ RejoinBtn.MouseButton1Code = RejoinBtn.MouseButton1Click:Connect(function()
     end)
 end)
 
--- --- 安定・高速メインループ処理 ---
+-- --- メイン処理（スピード・飛行・地面埋め） ---
 RunService.Heartbeat:Connect(function()
     local char = player.Character
     if not char then return end
@@ -269,12 +269,14 @@ RunService.Heartbeat:Connect(function()
         end
     end
 
+    -- 地面にしっかり埋まってリスポーンや敵から身を守る処理
     if config.Underground then
-        rootPart.CFrame = rootPart.CFrame - Vector3.new(0, 4.2, 0)
+        rootPart.CFrame = rootPart.CFrame - Vector3.new(0, 4.5, 0)
+        rootPart.Velocity = Vector3.new(0, 0, 0)
     end
 end)
 
--- --- 真のオートスティール（周囲の「盗む」プロンプトやアクションを自動実行） ---
+-- --- 真のオートスティール（近づいた瞬間に「盗む」プロンプトを自動実行） ---
 RunService.Stepped:Connect(function()
     if not config.AutoSteer then return end
     local char = player.Character
@@ -282,31 +284,20 @@ RunService.Stepped:Connect(function()
     local rootPart = char:FindFirstChild("HumanoidRootPart")
     if not rootPart then return end
 
-    -- マップ全体のProximityPromptや、盗む判定を持つパーツを探索して自動トリガー
     pcall(function()
         for _, obj in pairs(workspace:GetDescendants()) do
-            -- ProximityPrompt（「盗む」などの長押し・タップ要求）を自動発動
             if obj:IsA("ProximityPrompt") then
                 local parentPart = obj.Parent
                 if parentPart and parentPart:IsA("BasePart") then
-                    if (rootPart.Position - parentPart.Position).Magnitude <= (obj.MaxActivationDistance + 5) then
-                        -- プロンプトの条件をバイパスして即座に発動
+                    if (rootPart.Position - parentPart.Position).Magnitude <= (obj.MaxActivationDistance + 8) then
                         fireproximityprompt(obj)
                     end
-                end
-            end
-            
-            -- 「盗む」や「Steal」という文字が含まれるタッチパーツ（触れるだけで盗めるオブジェクト）への自動接近
-            if obj:IsA("TouchTransmitter") and obj.Parent then
-                local part = obj.Parent
-                if part:IsA("BasePart") and (rootPart.Position - part.Position).Magnitude < 30 then
-                    -- 触れに行くようにわずかに引き寄せる
-                    rootPart.CFrame = rootPart.CFrame:Lerp(part.CFrame + Vector3.new(0, 1, 0), 0.2)
                 end
             end
         end
     end)
 end)
 
-notify("shouyuhubfmly", "オートスティール機能をロードしました！")
+notify("shouyuhubfmly", "完全版をロードしました！")
+！")
 
