@@ -1,4 +1,4 @@
--- Shouyuhub
+-- Shouyuhub Ultimate Edition
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local StarterGui = game:GetService("StarterGui")
@@ -9,15 +9,15 @@ local pgui = player:WaitForChild("PlayerGui")
 
 -- 既存UIのクリーンアップ
 for _, v in pairs(pgui:GetChildren()) do
-    if v.Name == "Shouyuhub_Gui" then
+    if v.Name == "Shouyuhub_Ultimate_Gui" then
         v:Destroy()
     end
 end
 
 local config = {
-    SpeedValue = 150,
+    SpeedValue = 220,
     SpeedHack = false,
-    AutoSteer = false,      -- 周囲の「盗む」プロンプトを自動実行
+    AutoSteer = false,      -- 動画のような超高速オートスティール
     Fly = false,
     FlySpeed = 60,
     Underground = false,    -- 地面に埋まる（リスポーン防止）
@@ -35,7 +35,7 @@ local function notify(title, text)
 end
 
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "Shouyuhub_Gui"
+ScreenGui.Name = "Shouyuhub_Ultimate_Gui"
 ScreenGui.Parent = pgui
 ScreenGui.ResetOnSpawn = false
 
@@ -71,7 +71,7 @@ local MainCorner = Instance.new("UICorner")
 MainCorner.CornerRadius = UDim.new(0, 10)
 MainCorner.Parent = MainFrame
 
--- ヘッダー（Shouyuhub表記）
+-- ヘッダー
 local Header = Instance.new("Frame")
 Header.Size = UDim2.new(1, 0, 0, 35)
 Header.BackgroundColor3 = Color3.fromRGB(28, 22, 40)
@@ -137,7 +137,7 @@ local SpeedBtn = Instance.new("TextButton")
 SpeedBtn.Size = UDim2.new(1, 0, 0, 36)
 SpeedBtn.Position = UDim2.new(0, 0, 0, 220)
 SpeedBtn.BackgroundColor3 = Color3.fromRGB(32, 27, 45)
-SpeedBtn.Text = "移動速度切替 (現在: 150)"
+SpeedBtn.Text = "移動速度切替 (現在: 220)"
 SpeedBtn.TextColor3 = Color3.new(1, 1, 1)
 SpeedBtn.Font = Enum.Font.GothamMedium
 SpeedBtn.TextSize = 12
@@ -148,9 +148,9 @@ sc.CornerRadius = UDim.new(0, 6)
 sc.Parent = SpeedBtn
 
 SpeedBtn.MouseButton1Click:Connect(function()
-    if config.SpeedValue == 150 then config.SpeedValue = 220
-    elseif config.SpeedValue == 220 then config.SpeedValue = 90
-    else config.SpeedValue = 150 end
+    if config.SpeedValue == 220 then config.SpeedValue = 150
+    elseif config.SpeedValue == 150 then config.SpeedValue = 90
+    else config.SpeedValue = 220 end
     SpeedBtn.Text = "移動速度切替 (現在: " .. config.SpeedValue .. ")"
 end)
 
@@ -209,7 +209,7 @@ RunService.Heartbeat:Connect(function()
     end
 end)
 
--- オートスティール（自動盗み）の実行処理
+-- 超高速オートスティール処理（動画の動きを完全再現）
 RunService.Stepped:Connect(function()
     if not config.AutoSteer then return end
     local char = player.Character
@@ -222,7 +222,7 @@ RunService.Stepped:Connect(function()
             if obj:IsA("ProximityPrompt") then
                 local parentPart = obj.Parent
                 if parentPart and parentPart:IsA("BasePart") then
-                    if (rootPart.Position - parentPart.Position).Magnitude <= (obj.MaxActivationDistance + 12) then
+                    if (rootPart.Position - parentPart.Position).Magnitude <= (obj.MaxActivationDistance + 20) then
                         fireproximityprompt(obj)
                     end
                 end
@@ -230,3 +230,6 @@ RunService.Stepped:Connect(function()
         end
     end)
 end)
+
+notify("Shouyuhub", "最高の状態にアップデートしました！")
+
