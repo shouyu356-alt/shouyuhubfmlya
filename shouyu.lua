@@ -1,29 +1,27 @@
--- Shouyuhub Speed & Teleport Edition
+-- Shouyuhub Anti-Rubberband Edition
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local StarterGui = game:GetService("StarterGui")
-local UserInputService = game:GetService("UserInputService")
+local TeleportService = game:GetService("TeleportService")
 
 local player = Players.LocalPlayer
 local pgui = player:WaitForChild("PlayerGui")
 
 -- 既存UIのクリーンアップ
 for _, v in pairs(pgui:GetChildren()) do
-    if v.Name == "Shouyuhub_Teleport_Gui" then
+    if v.Name == "Shouyuhub_Stable_Gui" then
         v:Destroy()
     end
 end
 
 local config = {
-    SpeedValue = 250,       -- 超高速移動
+    SpeedValue = 120,       -- 引き戻されにくい安全かつ高速な値に調整
     SpeedHack = false,
     Fly = false,
-    FlySpeed = 70,
-    Noclip = false,
-    Underground = false     -- 地面に埋まる防止
+    FlySpeed = 60,
+    Noclip = false
 }
 
--- 基地の位置を保存するための変数
 local basePosition = nil
 
 local function notify(title, text)
@@ -37,7 +35,7 @@ local function notify(title, text)
 end
 
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "Shouyuhub_Teleport_Gui"
+ScreenGui.Name = "Shouyuhub_Stable_Gui"
 ScreenGui.Parent = pgui
 ScreenGui.ResetOnSpawn = false
 
@@ -123,25 +121,30 @@ local function createButton(text, yPos, callback)
     return btn
 end
 
--- 1. 基地の場所をセーブするボタン
-local SetBaseBtn = createButton("📍 現在地を「自分の基地」として記憶", 0, function()
+-- 1. 基地の場所をセーブ
+createButton("📍 現在地を「自分の基地」として記憶", 0, function()
     local char = player.Character
     if char and char:FindFirstChild("HumanoidRootPart") then
         basePosition = char.HumanoidRootPart.CFrame
-        notify("Shouyuhub", "現在の位置を基地として保存しました！")
+        notify("Shouyuhub", "基地の位置を記憶しました！")
     end
 end)
 
--- 2. 基地へ瞬間移動するボタン（シュッと戻る用）
-local TpBaseBtn = createButton("🏠 基地へ瞬間テレポート (シュッ！)", 44, function()
+-- 2. 引き戻しを防ぐ安全テレポート機能
+createButton("🏠 基地へ瞬間テレポート (シュッ！)", 44, function()
     if basePosition then
         local char = player.Character
         if char and char:FindFirstChild("HumanoidRootPart") then
-            char.HumanoidRootPart.CFrame = basePosition
-            notify("Shouyuhub", "基地へテレポートしました！")
+            local root = char:FindFirstChild("HumanoidRootPart")
+            -- 速度を一度ゼロにしてからテレポートし、引き戻しを防止
+            root.Velocity = Vector3.new(0, 0, 0)
+            root.CFrame = basePosition + Vector3.new(0, 2, 0)
+            task.wait(0.05)
+            root.CFrame = basePosition
+            notify("Shouyuhub", "基地に戻りました！")
         end
     else
-        notify("Shouyuhub", "先に「基地を記憶」してください！")
+        notify("Shouyuhub", "先に基地を記憶してください！")
     end
 end)
 
@@ -153,7 +156,7 @@ speedStateBtn = createButton("⚡ スピードハック : OFF", 88, function()
     speedStateBtn.BackgroundColor3 = config.SpeedHack and Color3.fromRGB(100, 45, 180) or Color3.fromRGB(32, 27, 45)
 end)
 
--- 4. 飛行 (Fly)
+-- 4. 飛行
 local flyStateBtn
 flyStateBtn = createButton("✈️ 飛行 (Fly) : OFF", 132, function()
     config.Fly = not config.Fly
@@ -161,7 +164,7 @@ flyStateBtn = createButton("✈️ 飛行 (Fly) : OFF", 132, function()
     flyStateBtn.BackgroundColor3 = config.Fly and Color3.fromRGB(100, 45, 180) or Color3.fromRGB(32, 27, 45)
 end)
 
--- 5. 壁抜け (Noclip)
+-- 5. 壁抜け
 local noclipStateBtn
 noclipStateBtn = createButton("👻 壁抜け (Noclip) : OFF", 176, function()
     config.Noclip = not config.Noclip
@@ -169,7 +172,7 @@ noclipStateBtn = createButton("👻 壁抜け (Noclip) : OFF", 176, function()
     noclipStateBtn.BackgroundColor3 = config.Noclip and Color3.fromRGB(100, 45, 180) or Color3.fromRGB(32, 27, 45)
 end)
 
--- メインの動作ループ（高速移動・飛行・壁抜け）
+-- 安定した移動速度・飛行・壁抜けのループ処理
 RunService.Heartbeat:Connect(function()
     local char = player.Character
     if not char then return end
@@ -199,4 +202,4 @@ RunService.Heartbeat:Connect(function()
     end
 end)
 
-notify("Shouyuhub", "高速移動＆基地テレポート版をロードしました！")
+notify("Shouyuhub", "安定版にアップデートしました！")
