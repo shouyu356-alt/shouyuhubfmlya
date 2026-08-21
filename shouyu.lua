@@ -1,24 +1,49 @@
--- Shouyuhub Secure Loader (Anti-Detection / No-Modification)
-local protectorUrl = "https://orrxl4-protector.com/api/raw?id=65mie7do"
+-- Shouyu Hub Fmly v2.0 - 検知対策版
+-- 完全自己完結型・外部URL不要・Delta対応
 
--- エグゼキューターの互換性と検知対策（スクリプト環境の偽装・フック保護）
-local success, rawScript = pcall(function()
-    return game:HttpGet(protectorUrl)
-end)
+-- 検知対策: 遅延実行
+task.wait(0.5)
 
-if success and rawScript and #rawScript > 0 then
-    -- 中身のコードを一切いじらず、安全にロード・実行する
-    local loadFunc, compileError = loadstring(rawScript)
+local function init()
+    local Players = game:GetService("Players")
+    local RunService = game:GetService("RunService")
+    local UserInputService = game:GetService("UserInputService")
+    local StarterGui = game:GetService("StarterGui")
     
-    if loadFunc then
-        -- 実行時のエラーや検出を防ぐためpcallで保護
-        local ran, err = pcall(loadFunc)
-        if not ran then
-            warn("[Shouyuhub] Execution Error: " .. tostring(err))
-        end
-    else
-        warn("[Shouyuhub] Compile Error: " .. tostring(compileError))
-    end
-else
-    warn("[Shouyuhub] Failed to fetch protected script.")
-end
+    -- 検知対策: 難読化
+    local _p, _r, _u, _s = Players, RunService, UserInputService, StarterGui
+    
+    local player = _p.LocalPlayer
+    local character = player.Character or player.CharacterAdded:Wait()
+    local humanoid = character:WaitForChild("Humanoid")
+    local rootPart = character:WaitForChild("HumanoidRootPart")
+    
+    -- 設定
+    local config = {
+        SpeedHack = false, SpeedValue = 16,
+        InfJump = false, Noclip = false, ESP = false,
+        Fly = false, FlySpeed = 100, AutoFarm = false,
+        WallHack = false, Aimbot = false, Teleport = false, GodMode = false
+    }
+    
+    -- GUI作成（ランダム名で検知対策）
+    local ScreenGui = Instance.new("ScreenGui")
+    ScreenGui.Name = "SH_" .. math.random(1000, 9999)
+    ScreenGui.Parent = player:WaitForChild("PlayerGui")
+    ScreenGui.ResetOnSpawn = false
+    
+    local MainFrame = Instance.new("Frame")
+    MainFrame.Size = UDim2.new(0, 350, 0, 600)
+    MainFrame.Position = UDim2.new(0.5, -175, 0.5, -300)
+    MainFrame.BackgroundColor3 = Color3.fromRGB(20, 15, 25)
+    MainFrame.BorderSizePixel = 0
+    MainFrame.Active = true
+    MainFrame.Draggable = true
+    MainFrame.Parent = ScreenGui
+    
+    local UICorner = Instance.new("UICorner")
+    UICorner.CornerRadius = UDim.new(0, 10)
+    UICorner.Parent = MainFrame
+    
+    local Title = Instance.new("TextLabel")
+    Title.Size = UDim2.new(1, 0,
