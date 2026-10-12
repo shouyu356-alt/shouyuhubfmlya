@@ -197,45 +197,83 @@ local function money(v)
         if v >= x[1] then return string.format("$%.2f%s/s", v / x[1], x[2]) end
     end
     return string.format("$%d/s", math.floor(v + 0.5))
-end-- ============================================================
--- SHOUYUHUB - PART 3/6
--- フライ移動（速度1350）・掴む
+end-- ===========================
+	-- ============================================================
+-- SHOUYUHUB - PART 3/6 (完全版)
+-- フライ移動（速度1350・両方適用）・掴む
 -- ============================================================
 
 local flyCancel = false
 
--- ★ dt ベースで速度1350を正確に反映
+-- ============================================================
+-- flyTo 完全版
+-- PreSimulation + Heartbeat 二段構え
+-- NetworkOwner取得 + スタック検知 + ジッター
+-- ============================================================
 local function flyTo(target, cancelCheck)
     local char = localPlayer.Character
     local myRoot = root()
     if not char or not myRoot then return false end
 
     local hum = char:FindFirstChildOfClass("Humanoid")
-    if hum then pcall(function() hum.PlatformStand = true end) end
+    if hum then
+        pcall(function()
+            hum.PlatformStand = true
+        end)
+    end
+
+    -- NetworkOwner を自分に
+    pcall(function()
+        myRoot:SetNetworkOwner(localPlayer)
+    end)
 
     local started = os.clock()
     local result = false
-    local lastMark, lastClock, stuck = nil, 0, 0
+    local lastPos = myRoot.Position
+    local lastCheck = os.clock()
+    local stuck = 0
+    local preConn = nil
+    local beatConn = nil
+    local reached = false
+    local networkRefresh = 0
 
-    while os.clock() - started < CFG.FlyTimeout do
-        if flyCancel then break end
-        if type(cancelCheck) == "function" and cancelCheck() then break end
+    -- PreSimulation で物理前にCFrame書き換え
+    preConn = RunService.PreSimulation:Connect(function(dt)
+        if reached then return end
+        if flyCancel then return end
+        if type(cancelCheck) == "function" and cancelCheck() then return end
 
         local r = root()
-        if not r or not r.Parent then break end
+        if not r or not r.Parent then return end
+
+        -- NetworkOwner 定期再取得
+        networkRefresh = networkRefresh + dt
+        if networkRefresh > 0.5 then
+            networkRefresh = 0
+            pcall(function()
+                r:SetNetworkOwner(localPlayer)
+            end)
+        end
 
         local delta = target - r.Position
         local dist = delta.Magnitude
-        if dist <= 2 then result = true; break end
+        if dist <= 2 then
+            reached = true
+            result = true
+            return
+        end
+
+        if type(dt) ~= "number" or dt ~= dt then dt = 1/60 end
+        if dt > 0.1 then dt = 0.1 end
+        if dt < 1/240 then dt = 1/240 end
 
         local dir = dist > 0.01 and delta.Unit or Vector3.zero
-
-        -- ★ dt を取得して正しい移動量を計算
-        local dt = RunService.Heartbeat:Wait()
-        if dt > 0.1 then dt = 0.1 end
-        if dt < 0.001 then dt = 1/60 end
-
         local step = math.min(CFG.Speed * dt, dist)
+
+        if step > 1 then
+            step = step * (1 + rndJ(0.03))
+        end
+
         local nextPos = r.Position + dir * step
 
         pcall(function()
@@ -243,21 +281,100 @@ local function flyTo(target, cancelCheck)
             r.AssemblyLinearVelocity = Vector3.zero
             r.AssemblyAngularVelocity = Vector3.zero
         end)
+    end)
 
-        if lastMark and (r.Position - lastMark).Magnitude < 1 then
-            stuck = stuck + 1
-            if os.clock() - lastClock > 0.5 or stuck > 60 then break end
-        else
-            lastMark = r.Position
-            lastClock = os.clock()
-            stuck = 0
+    -- Heartbeat 側でも強制（物理後の巻き戻し対策）
+    beatConn = RunService.Heartbeat:Connect(function(dt)
+        if reached then return end
+        if flyCancel then return end
+        if type(cancelCheck) == "function" and cancelCheck() then return end
+
+        local r = root()
+        if not r or not r.Parent then return end
+
+        local delta = target - r.Position
+        local dist = delta.Magnitude
+        if dist <= 2 then
+            reached = true
+            result = true
+            return
         end
+
+        -- スタック判定
+        local now = os.clock()
+        if now - lastCheck > 0.4 then
+            if (r.Position - lastPos).Magnitude < 5 then
+                stuck = stuck + 1
+            else
+                stuck = 0
+            end
+            lastPos = r.Position
+            lastCheck = now
+        end
+
+        -- スタック時はHeartbeat側で直接書き換え
+        if stuck >= 2 then
+            if type(dt) ~= "number" or dt ~= dt then dt = 1/60 end
+            if dt > 0.1 then dt = 0.1 end
+            if dt < 1/240 then dt = 1/240 end
+
+            local dir = dist > 0.01 and delta.Unit or Vector3.zero
+            local step = math.min(CFG.Speed * dt, dist)
+            local nextPos = r.Position + dir * step
+
+            pcall(function()
+                r.CFrame = CFrame.new(nextPos) * r.CFrame.Rotation
+                r.AssemblyLinearVelocity = Vector3.zero
+                r.AssemblyAngularVelocity = Vector3.zero
+            end)
+        end
+
+        if stuck > 8 then
+            reached = true
+            return
+        end
+
+        if os.clock() - started > CFG.FlyTimeout then
+            reached = true
+            return
+        end
+    end)
+
+    -- 到着 or タイムアウトまで待つ
+    while not reached do
+        if flyCancel then break end
+        if type(cancelCheck) == "function" and cancelCheck() then break end
+
+        local r = root()
+        if not r or not r.Parent then break end
+
+        local dist = (target - r.Position).Magnitude
+        if dist <= 2 then
+            result = true
+            break
+        end
+
+        if os.clock() - started > CFG.FlyTimeout then break end
+
+        RunService.Heartbeat:Wait()
     end
 
-    if hum then pcall(function() hum.PlatformStand = false end) end
+    -- クリーンアップ
+    if preConn then preConn:Disconnect() end
+    if beatConn then beatConn:Disconnect() end
+
+    if hum then
+        pcall(function()
+            hum.PlatformStand = false
+        end)
+    end
+
     return result
 end
 
+-- ============================================================
+-- grab: 卵を掴む
+-- ============================================================
 local function grab(uid, timeout)
     timeout = timeout or CFG.GrabTimeout
     local cache = { At = 0 }
@@ -295,10 +412,16 @@ local function grab(uid, timeout)
             task.spawn(takeEgg, uid)
         end
     end
+
     local r = root()
-    if r then pcall(function() r.AssemblyLinearVelocity = Vector3.zero end) end
+    if r then
+        pcall(function()
+            r.AssemblyLinearVelocity = Vector3.zero
+        end)
+    end
     return state.Carrying and state.Uid == uid
-	end-- ============================================================
+	end
+	
 -- SHOUYUHUB - PART 4/6
 -- 納品・メイン盗み・オートループ
 -- ============================================================
