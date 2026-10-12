@@ -1,3 +1,4 @@
+
 -- ============================================================
 -- SHOUYUHUB - Blood Moon Edition - PART 1/6
 -- 設定・テーマ・ゲームハンドル
@@ -626,9 +627,13 @@ local function stealAndDeliver(uid)
                 if live then flyTo(live + Vector3.new(0, 3, 0)) end
             end
 
+            -- PART 4 の stealAndDeliver 内
+
             -- 掴む
             if not grab(uid, CFG.GrabTimeout) then return end
 
+            -- ★ flyHome → walkHome に変更
+            walkHome()
             -- 家へ飛ぶ（同じ速度1350）
             flyHome(lineInfo())
         end)
