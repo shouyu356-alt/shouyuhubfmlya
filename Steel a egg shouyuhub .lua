@@ -1,6 +1,6 @@
 -- ============================================================
--- Blood Moon Steal Hub - PART 1/6
--- 設定・テーマ・ゲームハンドル・状態
+-- SHOUYUHUB - Blood Moon Edition - PART 1/6
+-- 設定・テーマ・ゲームハンドル
 -- ============================================================
 
 local Players = game:GetService("Players")
@@ -12,7 +12,7 @@ local TweenService = game:GetService("TweenService")
 local localPlayer = Players.LocalPlayer
 
 local CFG = {
-    Speed = 1400,
+    Speed = 1350,
     GrabInterval = 0.03,
     GrabTimeout = 4,
     PromptRadius = 12,
@@ -20,19 +20,6 @@ local CFG = {
     DropDelay = 0.15,
     FlyTimeout = 20,
     AutoRefreshInterval = 4,
-}
-
-local STEALTH = {
-    Enabled = true,
-    HopRandomMin = 8,
-    HopRandomMax = 25,
-    PauseMin = 0.02,
-    PauseMax = 0.08,
-    LandingJitter = 3,
-    MicroJitter = 0.3,
-    GrabDelayMin = 0.05,
-    GrabDelayMax = 0.2,
-    DeliverPause = 0.15,
 }
 
 local function rnd(a, b) return a + math.random() * (b - a) end
@@ -85,9 +72,8 @@ end
 pcall(function()
     local ev = rem("RE/EggWorld/FieldEggRedeemVerdict")
     if ev then ev.OnClientEvent:Connect(function() state.Delivered = os.clock() end) end
-end)
--- ============================================================
--- Blood Moon Steal Hub - PART 2/6
+end)-- ============================================================
+-- SHOUYUHUB - PART 2/6
 -- 卵情報・座標系
 -- ============================================================
 
@@ -212,12 +198,13 @@ local function money(v)
     end
     return string.format("$%d/s", math.floor(v + 0.5))
 end-- ============================================================
--- Blood Moon Steal Hub - PART 3/6
--- フライ移動・掴む・納品
+-- SHOUYUHUB - PART 3/6
+-- フライ移動（速度1350）・掴む
 -- ============================================================
 
 local flyCancel = false
 
+-- ★ dt ベースで速度1350を正確に反映
 local function flyTo(target, cancelCheck)
     local char = localPlayer.Character
     local myRoot = root()
@@ -229,10 +216,6 @@ local function flyTo(target, cancelCheck)
     local started = os.clock()
     local result = false
     local lastMark, lastClock, stuck = nil, 0, 0
-
-    if STEALTH.Enabled then
-        target = target + Vector3.new(rndJ(STEALTH.LandingJitter), 0, rndJ(STEALTH.LandingJitter))
-    end
 
     while os.clock() - started < CFG.FlyTimeout do
         if flyCancel then break end
@@ -246,18 +229,14 @@ local function flyTo(target, cancelCheck)
         if dist <= 2 then result = true; break end
 
         local dir = dist > 0.01 and delta.Unit or Vector3.zero
-        local step
-        if STEALTH.Enabled then
-            step = math.min(CFG.Speed * (1/60), rnd(STEALTH.HopRandomMin, STEALTH.HopRandomMax), dist)
-        else
-            step = math.min(CFG.Speed * (1/60), dist)
-        end
 
-        local jitter = STEALTH.Enabled
-            and Vector3.new(rndJ(STEALTH.MicroJitter), 0, rndJ(STEALTH.MicroJitter))
-            or Vector3.zero
+        -- ★ dt を取得して正しい移動量を計算
+        local dt = RunService.Heartbeat:Wait()
+        if dt > 0.1 then dt = 0.1 end
+        if dt < 0.001 then dt = 1/60 end
 
-        local nextPos = r.Position + dir * step + jitter
+        local step = math.min(CFG.Speed * dt, dist)
+        local nextPos = r.Position + dir * step
 
         pcall(function()
             r.CFrame = CFrame.new(nextPos) * r.CFrame.Rotation
@@ -265,21 +244,14 @@ local function flyTo(target, cancelCheck)
             r.AssemblyAngularVelocity = Vector3.zero
         end)
 
-        if STEALTH.Enabled then
-            local p = rnd(STEALTH.PauseMin, STEALTH.PauseMax)
-            if p > 0.03 then task.wait(p) end
-        end
-
         if lastMark and (r.Position - lastMark).Magnitude < 1 then
             stuck = stuck + 1
-            if os.clock() - lastClock > 0.5 or stuck > 30 then break end
+            if os.clock() - lastClock > 0.5 or stuck > 60 then break end
         else
             lastMark = r.Position
             lastClock = os.clock()
             stuck = 0
         end
-
-        RunService.Heartbeat:Wait()
     end
 
     if hum then pcall(function() hum.PlatformStand = false end) end
@@ -291,10 +263,6 @@ local function grab(uid, timeout)
     local cache = { At = 0 }
     local waited, since = 0, 1
 
-    if STEALTH.Enabled then
-        task.wait(rnd(STEALTH.GrabDelayMin, STEALTH.GrabDelayMax))
-    end
-
     while not state.Carrying and waited < timeout and not state.Cancel do
         local r = root()
         local egg = eggNow(uid, cache)
@@ -305,7 +273,7 @@ local function grab(uid, timeout)
         if r and egg then
             local delta = egg - r.Position
             if delta.Magnitude > 2 then
-                local pace = STEALTH.Enabled and 150 or 200
+                local pace = 200
                 local v = delta / math.max(0.08, dt)
                 if v.Magnitude > pace then v = v.Unit * pace end
                 pcall(function()
@@ -313,10 +281,7 @@ local function grab(uid, timeout)
                     r.AssemblyAngularVelocity = Vector3.zero
                 end)
             end
-            local interval = STEALTH.Enabled
-                and rnd(CFG.GrabInterval, CFG.GrabInterval * 3)
-                or CFG.GrabInterval
-            if since >= interval then
+            if since >= CFG.GrabInterval then
                 since = 0
                 local pr = promptNear(egg - Vector3.new(0, 3, 0), CFG.PromptRadius)
                 if pr and typeof(fireproximityprompt) == "function" then
@@ -333,8 +298,12 @@ local function grab(uid, timeout)
     local r = root()
     if r then pcall(function() r.AssemblyLinearVelocity = Vector3.zero end) end
     return state.Carrying and state.Uid == uid
-end
+	end-- ============================================================
+-- SHOUYUHUB - PART 4/6
+-- 納品・メイン盗み・オートループ
+-- ============================================================
 
+-- ★ 納品も同じ flyTo（速度1350）
 local function flyHome(lineX)
     local started = os.clock()
     local home = homePoint()
@@ -343,7 +312,7 @@ local function flyHome(lineX)
     end)
     if not ok and not state.Carrying then return state.Delivered >= started end
     if state.Carrying then
-        task.wait(STEALTH.Enabled and (STEALTH.DeliverPause + rnd(0, 0.1)) or CFG.DropDelay)
+        task.wait(CFG.DropDelay)
         dropEgg()
         local w = 0
         while state.Delivered < started and w < 1.5 do
@@ -351,10 +320,7 @@ local function flyHome(lineX)
         end
     end
     return state.Delivered >= started
-	end-- ============================================================
--- Blood Moon Steal Hub - PART 4/6
--- メイン盗み・オートループ
--- ============================================================
+end
 
 local function stealAndDeliver(uid)
     if state.Busy then return end
@@ -364,8 +330,6 @@ local function stealAndDeliver(uid)
 
     task.spawn(function()
         local ok, err = pcall(function()
-            if STEALTH.Enabled then task.wait(rnd(0.1, 0.4)) end
-
             local egg = eggPos(uid)
             if not egg then return end
 
@@ -375,26 +339,16 @@ local function stealAndDeliver(uid)
                 while state.Carrying and w < 1 do w = w + RunService.Heartbeat:Wait() end
             end
 
-            local offset
-            if STEALTH.Enabled then
-                local a = math.random() * math.pi * 2
-                local rad = rnd(2.5, 4)
-                offset = Vector3.new(math.cos(a) * rad, 3, math.sin(a) * rad)
-            else
-                offset = Vector3.new(0, 3, 0)
-            end
-
-            if not flyTo(egg + offset) then
+            -- 卵へ飛ぶ（速度1350）
+            if not flyTo(egg + Vector3.new(0, 3, 0)) then
                 local live = eggNow(uid, { At = 0 })
-                if live then flyTo(live + offset) end
+                if live then flyTo(live + Vector3.new(0, 3, 0)) end
             end
 
-            if STEALTH.Enabled then task.wait(rnd(0.05, 0.15)) end
-
+            -- 掴む
             if not grab(uid, CFG.GrabTimeout) then return end
 
-            if STEALTH.Enabled then task.wait(rnd(0.1, 0.3)) end
-
+            -- 家へ飛ぶ（同じ速度1350）
             flyHome(lineInfo())
         end)
 
@@ -428,7 +382,7 @@ local function startAutoSteal()
                 local t = pickTarget()
                 if t then stealAndDeliver(t.Uid) end
             end
-            task.wait(STEALTH.Enabled and rnd(0.25, 0.75) or 0.3)
+            task.wait(0.2)
         end
     end)
 end
@@ -439,20 +393,16 @@ local function stopAutoSteal()
     flyCancel = true
     autoThread = nil
 		end-- ============================================================
--- Blood Moon Steal Hub - PART 5/6
--- UI前半（GUI作成・ヘッダー）
+-- SHOUYUHUB - PART 5/6
+-- UI前半（GUI・ヘッダー・ボディ・リスト）
 -- ============================================================
 
-print("[BloodMoon] ===== UI構築開始 =====")
+print("[ShouyuHub] UI構築開始")
 
-local UI = {
-    W = 340, H = 500, Scale = 1,
-    Minimized = false, AutoRefresh = true,
-}
-local UI_W, UI_H = UI.W, UI.H
-local UI_H_MIN = 68
+local UI = { W = 340, H = 500, Scale = 1, Minimized = false, AutoRefresh = true }
+local UI_W, UI_H, UI_H_MIN = UI.W, UI.H, 68
 
-local function getParentGui()
+local function getParent()
     if type(gethui) == "function" then
         local ok, r = pcall(gethui)
         if ok and typeof(r) == "Instance" then return r end
@@ -462,275 +412,189 @@ local function getParentGui()
     return localPlayer:FindFirstChildOfClass("PlayerGui")
 end
 
-local function createScreenGui()
-    local gui = Instance.new("ScreenGui")
-    gui.Name = "BloodMoonUI_" .. tostring(math.random(1000, 9999))
-    gui.ResetOnSpawn = false
-    gui.IgnoreGuiInset = true
-    gui.DisplayOrder = 999999
-    gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-    gui.Enabled = true
+local gui = Instance.new("ScreenGui")
+gui.Name = "ShouyuHub_" .. tostring(math.random(1000, 9999))
+gui.ResetOnSpawn = false
+gui.IgnoreGuiInset = true
+gui.DisplayOrder = 999999
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+if type(syn) == "table" and type(syn.protect_gui) == "function" then
+    pcall(syn.protect_gui, gui)
+end
+gui.Parent = getParent()
 
-    if type(syn) == "table" and type(syn.protect_gui) == "function" then
-        pcall(syn.protect_gui, gui)
-    end
-
-    local parent = getParentGui()
-    if parent then
-        local ok = pcall(function() gui.Parent = parent end)
-        if not ok or not gui.Parent then
-            local pg = localPlayer:WaitForChild("PlayerGui", 5)
-            if pg then gui.Parent = pg end
-        end
-    end
-
-    print("[BloodMoon] GUI Parent:", gui.Parent and gui.Parent:GetFullName() or "nil")
-    return gui
+local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1280, 720)
+if IS_MOBILE then
+    UI.Scale = math.min(vp.X * 0.92 / UI_W, vp.Y * 0.80 / UI_H, 1)
 end
 
-local function makeUI()
-    local gui = createScreenGui()
-    if not gui then return nil end
+-- メイン
+local main = Instance.new("Frame", gui)
+main.AnchorPoint = Vector2.new(0.5, 0.5)
+main.Size = UDim2.fromOffset(UI_W, UI_H)
+main.Position = UDim2.new(0.5, 0, 0.5, 0)
+main.BackgroundColor3 = THEME.Bg
+main.BorderSizePixel = 0
+main.Active = true
+main.ClipsDescendants = true
 
-    local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1280, 720)
-    if IS_MOBILE then
-        UI.Scale = math.min(vp.X * 0.92 / UI_W, vp.Y * 0.80 / UI_H, 1)
-    end
+local us = Instance.new("UIScale", main)
+us.Scale = UI.Scale
 
-    local main = Instance.new("Frame")
-    main.Name = "Main"
-    main.AnchorPoint = Vector2.new(0.5, 0.5)
-    main.Size = UDim2.fromOffset(UI_W, UI_H)
-    main.Position = UDim2.new(0.5, 0, 0.5, 0)
-    main.BackgroundColor3 = THEME.Bg
-    main.BorderSizePixel = 0
-    main.Active = true
-    main.ClipsDescendants = true
-    main.Parent = gui
+Instance.new("UICorner", main).CornerRadius = UDim.new(0, 14)
+local stroke = Instance.new("UIStroke", main)
+stroke.Color = THEME.Accent
+stroke.Thickness = 1.5
+stroke.Transparency = 0.25
 
-    local us = Instance.new("UIScale")
-    us.Scale = UI.Scale
-    us.Parent = main
+-- ★ Blood Moon 背景
+local bg = Instance.new("Frame", main)
+bg.Size = UDim2.fromScale(1, 1)
+bg.BackgroundColor3 = THEME.AccentDeep
+bg.BackgroundTransparency = 0.7
+bg.BorderSizePixel = 0
+bg.ZIndex = 1
+Instance.new("UICorner", bg).CornerRadius = UDim.new(0, 14)
+local bgG = Instance.new("UIGradient", bg)
+bgG.Rotation = 90
+bgG.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, THEME.AccentDeep),
+    ColorSequenceKeypoint.new(0.5, THEME.Bg),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(5, 2, 3)),
+})
 
-    local corner = Instance.new("UICorner")
-    corner.CornerRadius = UDim.new(0, 14)
-    corner.Parent = main
+-- ヘッダー
+local header = Instance.new("Frame", main)
+header.Size = UDim2.new(1, -16, 0, 52)
+header.Position = UDim2.fromOffset(8, 8)
+header.BackgroundColor3 = THEME.Panel
+header.BackgroundTransparency = 0.05
+header.BorderSizePixel = 0
+header.ZIndex = 5
+Instance.new("UICorner", header).CornerRadius = UDim.new(0, 10)
+local hS = Instance.new("UIStroke", header)
+hS.Color = THEME.AccentDark
+hS.Thickness = 1.2
+hS.Transparency = 0.35
 
-    local stroke = Instance.new("UIStroke")
-    stroke.Color = THEME.Accent
-    stroke.Thickness = 1.5
-    stroke.Transparency = 0.25
-    stroke.Parent = main
+-- 血月マーク
+local moon = Instance.new("Frame", header)
+moon.Size = UDim2.fromOffset(30, 30)
+moon.Position = UDim2.fromOffset(12, 11)
+moon.BackgroundColor3 = THEME.Accent
+moon.BorderSizePixel = 0
+moon.ZIndex = 6
+Instance.new("UICorner", moon).CornerRadius = UDim.new(1, 0)
+local mG = Instance.new("UIGradient", moon)
+mG.Color = ColorSequence.new(THEME.AccentSoft, THEME.AccentDark)
+mG.Rotation = 135
+local mS = Instance.new("UIStroke", moon)
+mS.Color = THEME.AccentSoft
+mS.Thickness = 2
+mS.Transparency = 0.4
 
-    local bgGrad = Instance.new("Frame")
-    bgGrad.Size = UDim2.fromScale(1, 1)
-    bgGrad.BackgroundColor3 = THEME.AccentDeep
-    bgGrad.BackgroundTransparency = 0.85
-    bgGrad.BorderSizePixel = 0
-    bgGrad.ZIndex = 1
-    bgGrad.Parent = main
+-- タイトル
+local title = Instance.new("TextLabel", header)
+title.Size = UDim2.new(1, -140, 0, 22)
+title.Position = UDim2.fromOffset(52, 8)
+title.BackgroundTransparency = 1
+title.Text = "SHOUYU HUB"
+title.TextColor3 = THEME.AccentSoft
+title.Font = Enum.Font.GothamBlack
+title.TextSize = 16
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.ZIndex = 6
 
-    local bgC = Instance.new("UICorner")
-    bgC.CornerRadius = UDim.new(0, 14)
-    bgC.Parent = bgGrad
+local titleG = Instance.new("UIGradient", title)
+titleG.Color = ColorSequence.new(THEME.AccentSoft, THEME.Accent)
 
-    local bgG = Instance.new("UIGradient")
-    bgG.Rotation = 90
-    bgG.Color = ColorSequence.new({
-        ColorSequenceKeypoint.new(0, THEME.AccentDeep),
-        ColorSequenceKeypoint.new(0.5, THEME.Bg),
-        ColorSequenceKeypoint.new(1, Color3.fromRGB(5, 2, 3)),
-    })
-    bgG.Parent = bgGrad
+local sub = Instance.new("TextLabel", header)
+sub.Size = UDim2.new(1, -140, 0, 14)
+sub.Position = UDim2.fromOffset(52, 30)
+sub.BackgroundTransparency = 1
+sub.Text = "STEAL AN EGG"
+sub.TextColor3 = THEME.TextDim
+sub.Font = Enum.Font.GothamBold
+sub.TextSize = 10
+sub.TextXAlignment = Enum.TextXAlignment.Left
+sub.ZIndex = 6
 
-    local header = Instance.new("Frame")
-    header.Name = "Header"
-    header.Size = UDim2.new(1, -16, 0, 52)
-    header.Position = UDim2.fromOffset(8, 8)
-    header.BackgroundColor3 = THEME.Panel
-    header.BackgroundTransparency = 0.05
-    header.BorderSizePixel = 0
-    header.ZIndex = 5
-    header.Parent = main
+-- 最小化ボタン
+local minBtn = Instance.new("TextButton", header)
+minBtn.Size = UDim2.fromOffset(32, 32)
+minBtn.Position = UDim2.new(1, -78, 0.5, -16)
+minBtn.BackgroundColor3 = THEME.AccentDeep
+minBtn.BorderSizePixel = 0
+minBtn.Text = "−"
+minBtn.TextColor3 = THEME.AccentSoft
+minBtn.Font = Enum.Font.GothamBold
+minBtn.TextSize = 20
+minBtn.AutoButtonColor = true
+minBtn.ZIndex = 6
+Instance.new("UICorner", minBtn).CornerRadius = UDim.new(0, 8)
 
-    local hC = Instance.new("UICorner")
-    hC.CornerRadius = UDim.new(0, 10)
-    hC.Parent = header
+-- 閉じるボタン
+local closeBtn = Instance.new("TextButton", header)
+closeBtn.Size = UDim2.fromOffset(32, 32)
+closeBtn.Position = UDim2.new(1, -42, 0.5, -16)
+closeBtn.BackgroundColor3 = THEME.AccentDeep
+closeBtn.BorderSizePixel = 0
+closeBtn.Text = "×"
+closeBtn.TextColor3 = THEME.AccentSoft
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.TextSize = 20
+closeBtn.AutoButtonColor = true
+closeBtn.ZIndex = 6
+Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 8)
 
-    local hS = Instance.new("UIStroke")
-    hS.Color = THEME.AccentDark
-    hS.Thickness = 1.2
-    hS.Transparency = 0.35
-    hS.Parent = header
+-- ボディ
+local body = Instance.new("Frame", main)
+body.Size = UDim2.new(1, -16, 1, -68)
+body.Position = UDim2.fromOffset(8, 68)
+body.BackgroundTransparency = 1
+body.ZIndex = 5
 
-    local moon = Instance.new("Frame")
-    moon.Size = UDim2.fromOffset(30, 30)
-    moon.Position = UDim2.fromOffset(12, 11)
-    moon.BackgroundColor3 = THEME.Accent
-    moon.BorderSizePixel = 0
-    moon.ZIndex = 6
-    moon.Parent = header
+-- ステータス
+local status = Instance.new("TextLabel", body)
+status.Size = UDim2.new(1, -110, 0, 22)
+status.Position = UDim2.fromOffset(6, 0)
+status.BackgroundTransparency = 1
+status.Text = "速度: " .. CFG.Speed .. " / 待機中"
+status.TextColor3 = THEME.TextDim
+status.Font = Enum.Font.GothamMedium
+status.TextSize = 12
+status.TextXAlignment = Enum.TextXAlignment.Left
+status.ZIndex = 6
 
-    local mC = Instance.new("UICorner")
-    mC.CornerRadius = UDim.new(1, 0)
-    mC.Parent = moon
+-- 卵リスト
+local list = Instance.new("ScrollingFrame", body)
+list.Size = UDim2.new(1, -4, 1, -150)
+list.Position = UDim2.fromOffset(2, 26)
+list.BackgroundColor3 = THEME.Panel
+list.BackgroundTransparency = 0.15
+list.BorderSizePixel = 0
+list.ScrollBarThickness = 5
+list.ScrollBarImageColor3 = THEME.Accent
+list.CanvasSize = UDim2.new()
+list.AutomaticCanvasSize = Enum.AutomaticSize.Y
+list.ZIndex = 5
+Instance.new("UICorner", list).CornerRadius = UDim.new(0, 10)
 
-    local mG = Instance.new("UIGradient")
-    mG.Color = ColorSequence.new(THEME.AccentSoft, THEME.AccentDark)
-    mG.Rotation = 135
-    mG.Parent = moon
+local lLayout = Instance.new("UIListLayout", list)
+lLayout.Padding = UDim.new(0, 5)
+lLayout.SortOrder = Enum.SortOrder.LayoutOrder
 
-    local mS = Instance.new("UIStroke")
-    mS.Color = THEME.AccentSoft
-    mS.Thickness = 2
-    mS.Transparency = 0.4
-    mS.Parent = moon
-
-    local title = Instance.new("TextLabel")
-    title.Size = UDim2.new(1, -140, 0, 22)
-    title.Position = UDim2.fromOffset(52, 8)
-    title.BackgroundTransparency = 1
-    title.Text = "BLOOD MOON HUB"
-    title.TextColor3 = THEME.AccentSoft
-    title.Font = Enum.Font.GothamBlack
-    title.TextSize = 16
-    title.TextXAlignment = Enum.TextXAlignment.Left
-    title.ZIndex = 6
-    title.Parent = header
-
-    local sub = Instance.new("TextLabel")
-    sub.Size = UDim2.new(1, -140, 0, 14)
-    sub.Position = UDim2.fromOffset(52, 30)
-    sub.BackgroundTransparency = 1
-    sub.Text = "STEAL AN EGG"
-    sub.TextColor3 = THEME.TextDim
-    sub.Font = Enum.Font.GothamBold
-    sub.TextSize = 10
-    sub.TextXAlignment = Enum.TextXAlignment.Left
-    sub.ZIndex = 6
-    sub.Parent = header
-
-    local minBtn = Instance.new("TextButton")
-    minBtn.Size = UDim2.fromOffset(32, 32)
-    minBtn.Position = UDim2.new(1, -78, 0.5, -16)
-    minBtn.BackgroundColor3 = THEME.AccentDeep
-    minBtn.BorderSizePixel = 0
-    minBtn.Text = "−"
-    minBtn.TextColor3 = THEME.AccentSoft
-    minBtn.Font = Enum.Font.GothamBold
-    minBtn.TextSize = 20
-    minBtn.AutoButtonColor = true
-    minBtn.ZIndex = 6
-    minBtn.Parent = header
-
-    local mC2 = Instance.new("UICorner")
-    mC2.CornerRadius = UDim.new(0, 8)
-    mC2.Parent = minBtn
-
-    local mS2 = Instance.new("UIStroke")
-    mS2.Color = THEME.Accent
-    mS2.Thickness = 1
-    mS2.Transparency = 0.4
-    mS2.Parent = minBtn
-
-    local closeBtn = Instance.new("TextButton")
-    closeBtn.Size = UDim2.fromOffset(32, 32)
-    closeBtn.Position = UDim2.new(1, -42, 0.5, -16)
-    closeBtn.BackgroundColor3 = THEME.AccentDeep
-    closeBtn.BorderSizePixel = 0
-    closeBtn.Text = "×"
-    closeBtn.TextColor3 = THEME.AccentSoft
-    closeBtn.Font = Enum.Font.GothamBold
-    closeBtn.TextSize = 20
-    closeBtn.AutoButtonColor = true
-    closeBtn.ZIndex = 6
-    closeBtn.Parent = header
-
-    local cC = Instance.new("UICorner")
-    cC.CornerRadius = UDim.new(0, 8)
-    cC.Parent = closeBtn
-
-    local cS = Instance.new("UIStroke")
-    cS.Color = THEME.Accent
-    cS.Thickness = 1
-    cS.Transparency = 0.4
-    cS.Parent = closeBtn
-
-    local body = Instance.new("Frame")
-    body.Name = "Body"
-    body.Size = UDim2.new(1, -16, 1, -68)
-    body.Position = UDim2.fromOffset(8, 68)
-    body.BackgroundTransparency = 1
-    body.ZIndex = 5
-    body.Parent = main
-
-    local status = Instance.new("TextLabel")
-    status.Size = UDim2.new(1, -110, 0, 22)
-    status.Position = UDim2.fromOffset(6, 0)
-    status.BackgroundTransparency = 1
-    status.Text = "速度: " .. CFG.Speed .. " / 待機中"
-    status.TextColor3 = THEME.TextDim
-    status.Font = Enum.Font.GothamMedium
-    status.TextSize = 12
-    status.TextXAlignment = Enum.TextXAlignment.Left
-    status.ZIndex = 6
-    status.Parent = body
-
-    local list = Instance.new("ScrollingFrame")
-    list.Name = "EggList"
-    list.Size = UDim2.new(1, -4, 1, -150)
-    list.Position = UDim2.fromOffset(2, 26)
-    list.BackgroundColor3 = THEME.Panel
-    list.BackgroundTransparency = 0.15
-    list.BorderSizePixel = 0
-    list.ScrollBarThickness = 5
-    list.ScrollBarImageColor3 = THEME.Accent
-    list.CanvasSize = UDim2.new()
-    list.AutomaticCanvasSize = Enum.AutomaticSize.Y
-    list.ZIndex = 5
-    list.Parent = body
-
-    local lC = Instance.new("UICorner")
-    lC.CornerRadius = UDim.new(0, 10)
-    lC.Parent = list
-
-    local lLayout = Instance.new("UIListLayout")
-    lLayout.Padding = UDim.new(0, 5)
-    lLayout.SortOrder = Enum.SortOrder.LayoutOrder
-    lLayout.Parent = list
-
-    local lPad = Instance.new("UIPadding")
-    lPad.PaddingTop = UDim.new(0, 6)
-    lPad.PaddingBottom = UDim.new(0, 6)
-    lPad.PaddingLeft = UDim.new(0, 6)
-    lPad.PaddingRight = UDim.new(0, 8)
-    lPad.Parent = list
-
-    -- 6分割の続きへ（PART 6）
-    return gui, main, body, header, status, list, minBtn, closeBtn
-			end-- ============================================================
--- Blood Moon Steal Hub - PART 6/6
--- UI後半（リスト・ボタン・イベント・起動）
--- ============================================================
-
-local okBuild, gui, main, body, header, statusLabel, list, minBtn, closeBtn = pcall(makeUI)
-
-if not okBuild or not gui then
-    warn("[BloodMoon] UI構築失敗: " .. tostring(gui))
-    return
-end
-
-print("[BloodMoon] UI構築OK")
+local lPad = Instance.new("UIPadding", list)
+lPad.PaddingTop = UDim.new(0, 6)
+lPad.PaddingBottom = UDim.new(0, 6)
+lPad.PaddingLeft = UDim.new(0, 6)
+lPad.PaddingRight = UDim.new(0, 8)
 
 local RARITY = {
-    Color3.fromRGB(200, 180, 180),
-    Color3.fromRGB(110, 210, 110),
-    Color3.fromRGB(90, 160, 255),
-    Color3.fromRGB(190, 110, 255),
-    Color3.fromRGB(255, 170, 50),
-    Color3.fromRGB(255, 80, 80),
-    Color3.fromRGB(255, 90, 200),
-    Color3.fromRGB(255, 100, 120),
+    Color3.fromRGB(200, 180, 180), Color3.fromRGB(110, 210, 110),
+    Color3.fromRGB(90, 160, 255), Color3.fromRGB(190, 110, 255),
+    Color3.fromRGB(255, 170, 50), Color3.fromRGB(255, 80, 80),
+    Color3.fromRGB(255, 90, 200), Color3.fromRGB(255, 100, 120),
 }
 
 local selectedUid = nil
@@ -763,38 +627,30 @@ local function rebuild()
     end
     table.sort(infos, function(a, b) return (a.Value or 0) > (b.Value or 0) end)
 
-    local still = false
     for index, info in ipairs(infos) do
-        still = still or info.Uid == selectedUid
-
-        local frame = Instance.new("TextButton")
+        local frame = Instance.new("TextButton", list)
         frame.Size = UDim2.new(1, 0, 0, 48)
         frame.BackgroundColor3 = THEME.Card
         frame.BorderSizePixel = 0
         frame.Text = ""
         frame.LayoutOrder = index
         frame.AutoButtonColor = true
-        frame.Parent = list
 
-        local fC = Instance.new("UICorner")
-        fC.CornerRadius = UDim.new(0, 8)
-        fC.Parent = frame
+        Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 8)
 
-        local fS = Instance.new("UIStroke")
+        local fS = Instance.new("UIStroke", frame)
         fS.Color = THEME.Stroke
         fS.Thickness = 1
         fS.Transparency = 0.6
-        fS.Parent = frame
 
-        local icon = Instance.new("ImageLabel")
+        local icon = Instance.new("ImageLabel", frame)
         icon.Size = UDim2.fromOffset(38, 38)
         icon.Position = UDim2.fromOffset(5, 5)
         icon.BackgroundTransparency = 1
         icon.Image = info.Icon or ""
         icon.ScaleType = Enum.ScaleType.Fit
-        icon.Parent = frame
 
-        local name = Instance.new("TextLabel")
+        local name = Instance.new("TextLabel", frame)
         name.Size = UDim2.new(1, -52, 0, 22)
         name.Position = UDim2.fromOffset(50, 4)
         name.BackgroundTransparency = 1
@@ -804,9 +660,8 @@ local function rebuild()
         name.TextSize = 15
         name.TextXAlignment = Enum.TextXAlignment.Left
         name.TextTruncate = Enum.TextTruncate.AtEnd
-        name.Parent = frame
 
-        local value = Instance.new("TextLabel")
+        local value = Instance.new("TextLabel", frame)
         value.Size = UDim2.new(1, -52, 0, 16)
         value.Position = UDim2.fromOffset(50, 26)
         value.BackgroundTransparency = 1
@@ -815,32 +670,23 @@ local function rebuild()
         value.Font = Enum.Font.GothamMedium
         value.TextSize = 13
         value.TextXAlignment = Enum.TextXAlignment.Left
-        value.Parent = frame
 
         rows[info.Uid] = { Frame = frame, Stroke = fS }
 
         frame.MouseButton1Click:Connect(function()
             setSelected(info.Uid)
-            statusLabel.Text = "選択中: " .. (info.Name or "?")
+            status.Text = "選択中: " .. (info.Name or "?")
         end)
     end
-    setSelected(still and selectedUid or nil)
-end
-
--- 月のパルス
-task.spawn(function()
-    while gui.Parent do
-        task.wait(0.05)
-        local t = tick() * 1.5
-        pcall(function()
-            local moon = header:FindFirstChild("Frame")
-        end)
-    end
-end)
+    setSelected(selectedUid)
+			end-- ============================================================
+-- SHOUYUHUB - PART 6/6
+-- UI後半（ボタン・イベント・起動）
+-- ============================================================
 
 -- ボタン生成
 local function mkBtn(text, pos, size, color)
-    local b = Instance.new("TextButton")
+    local b = Instance.new("TextButton", body)
     b.Size = size
     b.Position = pos
     b.BackgroundColor3 = color
@@ -851,18 +697,11 @@ local function mkBtn(text, pos, size, color)
     b.TextSize = 15
     b.AutoButtonColor = true
     b.ZIndex = 6
-    b.Parent = body
-
-    local bc = Instance.new("UICorner")
-    bc.CornerRadius = UDim.new(0, 12)
-    bc.Parent = b
-
-    local bs = Instance.new("UIStroke")
-    bs.Color = THEME.Accent
-    bs.Thickness = 1.2
-    bs.Transparency = 0.4
-    bs.Parent = b
-
+    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 12)
+    local s = Instance.new("UIStroke", b)
+    s.Color = THEME.Accent
+    s.Thickness = 1.2
+    s.Transparency = 0.4
     return b
 end
 
@@ -871,7 +710,7 @@ local autoBtn = mkBtn("自動盗み", UDim2.new(0.32, 2, 1, -60), UDim2.new(0.36
 local instantBtn = mkBtn("即盗み", UDim2.new(0.68, 4, 1, -60), UDim2.new(0.32, -4, 0, 52), Color3.fromRGB(40, 10, 25))
 
 -- 自動更新トグル
-local autoToggle = Instance.new("TextButton")
+local autoToggle = Instance.new("TextButton", body)
 autoToggle.Size = UDim2.fromOffset(80, 22)
 autoToggle.Position = UDim2.new(1, -94, 0, 2)
 autoToggle.BackgroundColor3 = THEME.AccentDeep
@@ -882,17 +721,13 @@ autoToggle.Font = Enum.Font.GothamBold
 autoToggle.TextSize = 10
 autoToggle.AutoButtonColor = true
 autoToggle.ZIndex = 6
-autoToggle.Parent = body
-
-local atC = Instance.new("UICorner")
-atC.CornerRadius = UDim.new(0, 6)
-atC.Parent = autoToggle
+Instance.new("UICorner", autoToggle).CornerRadius = UDim.new(0, 6)
 
 -- イベント
 refreshBtn.MouseButton1Click:Connect(function()
     if not state.Busy then
         rebuild()
-        statusLabel.Text = "手動更新完了"
+        status.Text = "手動更新完了"
     end
 end)
 
@@ -901,12 +736,12 @@ autoBtn.MouseButton1Click:Connect(function()
         stopAutoSteal()
         autoBtn.Text = "自動盗み"
         autoBtn.BackgroundColor3 = Color3.fromRGB(60, 15, 20)
-        statusLabel.Text = "自動盗み停止"
+        status.Text = "自動盗み停止"
     else
         startAutoSteal()
         autoBtn.Text = "停止"
         autoBtn.BackgroundColor3 = Color3.fromRGB(140, 20, 30)
-        statusLabel.Text = "自動盗み開始"
+        status.Text = "自動盗み開始"
     end
 end)
 
@@ -914,9 +749,9 @@ instantBtn.MouseButton1Click:Connect(function()
     if selectedUid then
         state.Busy = false
         stealAndDeliver(selectedUid)
-        statusLabel.Text = "即盗み実行中..."
+        status.Text = "即盗み実行中..."
     else
-        statusLabel.Text = "卵を選択してください"
+        status.Text = "卵を選択してください"
     end
 end)
 
@@ -935,20 +770,16 @@ end)
 minBtn.MouseButton1Click:Connect(function()
     UI.Minimized = not UI.Minimized
     if UI.Minimized then
-        TweenService:Create(main, TweenInfo.new(0.25), {
-            Size = UDim2.fromOffset(UI_W, UI_H_MIN)
-        }):Play()
+        TweenService:Create(main, TweenInfo.new(0.25), {Size = UDim2.fromOffset(UI_W, UI_H_MIN)}):Play()
         task.delay(0.12, function() body.Visible = false end)
     else
         body.Visible = true
-        TweenService:Create(main, TweenInfo.new(0.25), {
-            Size = UDim2.fromOffset(UI_W, UI_H)
-        }):Play()
+        TweenService:Create(main, TweenInfo.new(0.25), {Size = UDim2.fromOffset(UI_W, UI_H)}):Play()
     end
 end)
 
 -- フローティングボタン
-local floatBtn = Instance.new("TextButton")
+local floatBtn = Instance.new("TextButton", gui)
 floatBtn.Size = UDim2.fromOffset(60, 60)
 floatBtn.Position = UDim2.new(0, 16, 0.4, 0)
 floatBtn.BackgroundColor3 = THEME.Panel
@@ -960,61 +791,50 @@ floatBtn.TextSize = 26
 floatBtn.AutoButtonColor = true
 floatBtn.Visible = false
 floatBtn.ZIndex = 200
-floatBtn.Parent = gui
-
-local fbC = Instance.new("UICorner")
-fbC.CornerRadius = UDim.new(1, 0)
-fbC.Parent = floatBtn
-
-local fbS = Instance.new("UIStroke")
+Instance.new("UICorner", floatBtn).CornerRadius = UDim.new(1, 0)
+local fbS = Instance.new("UIStroke", floatBtn)
 fbS.Color = THEME.Accent
 fbS.Thickness = 2
 fbS.Transparency = 0.3
-fbS.Parent = floatBtn
 
 closeBtn.MouseButton1Click:Connect(function()
     gui.Enabled = false
     floatBtn.Visible = true
 end)
 
-local fbDrag, fbStart, fbStartPos, fbMoved = false, nil, nil, 0
-
+-- フローティング操作
+local fbMoved = 0
 floatBtn.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1
         or input.UserInputType == Enum.UserInputType.Touch then
-        fbDrag = true
-        fbStart = input.Position
-        fbStartPos = floatBtn.Position
         fbMoved = 0
+        local startPos = floatBtn.Position
+        local startIn = input.Position
+        local conn
+        conn = UserInputService.InputChanged:Connect(function(i)
+            if i.UserInputType == Enum.UserInputType.MouseMovement
+                or i.UserInputType == Enum.UserInputType.Touch then
+                local d = i.Position - startIn
+                fbMoved = math.max(fbMoved, d.Magnitude)
+                floatBtn.Position = UDim2.new(
+                    startPos.X.Scale, startPos.X.Offset + d.X,
+                    startPos.Y.Scale, startPos.Y.Offset + d.Y)
+            end
+        end)
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                if conn then conn:Disconnect() end
+                if fbMoved < 8 then
+                    gui.Enabled = true
+                    floatBtn.Visible = false
+                end
+            end
+        end)
     end
-end)
-
-floatBtn.InputEnded:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton1
-        or input.UserInputType == Enum.UserInputType.Touch then
-        fbDrag = false
-        if fbMoved < 8 then
-            gui.Enabled = true
-            floatBtn.Visible = false
-        end
-    end
-end)
-
-UserInputService.InputChanged:Connect(function(input)
-    if not fbDrag then return end
-    if input.UserInputType ~= Enum.UserInputType.MouseMovement
-        and input.UserInputType ~= Enum.UserInputType.Touch then return end
-    local d = input.Position - fbStart
-    fbMoved = math.max(fbMoved, d.Magnitude)
-    floatBtn.Position = UDim2.new(
-        fbStartPos.X.Scale, fbStartPos.X.Offset + d.X,
-        fbStartPos.Y.Scale, fbStartPos.Y.Offset + d.Y
-    )
 end)
 
 -- ヘッダードラッグ
 local drag, dragStart, startPos = false, nil, nil
-
 header.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1
         or input.UserInputType == Enum.UserInputType.Touch then
@@ -1023,14 +843,12 @@ header.InputBegan:Connect(function(input)
         startPos = main.Position
     end
 end)
-
 header.InputEnded:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1
         or input.UserInputType == Enum.UserInputType.Touch then
         drag = false
     end
 end)
-
 UserInputService.InputChanged:Connect(function(input)
     if not drag then return end
     if input.UserInputType ~= Enum.UserInputType.MouseMovement
@@ -1038,8 +856,7 @@ UserInputService.InputChanged:Connect(function(input)
     local d = input.Position - dragStart
     main.Position = UDim2.new(
         startPos.X.Scale, startPos.X.Offset + d.X,
-        startPos.Y.Scale, startPos.Y.Offset + d.Y
-    )
+        startPos.Y.Scale, startPos.Y.Offset + d.Y)
 end)
 
 -- 自動更新
@@ -1071,6 +888,5 @@ task.spawn(function()
     pcall(rebuild)
 end)
 
-print("[BloodMoon] ===== 起動完了 =====")
-print("  速度: " .. CFG.Speed)
+print("[ShouyuHub] 起動完了 / 速度 " .. CFG.Speed)
 print("  GUI Parent: " .. tostring(gui.Parent and gui.Parent:GetFullName() or "nil"))
