@@ -1,55 +1,62 @@
--- yslemEgg | Speed Move Edition
--- 卵まで速度2500で移動 → 通常ロジックで納品
--- UI大型化 + 日本語化
+-- ============================================================
+-- ShouyuHub Style UI + Chilli Hub Auto Steal
+-- 水色テーマ / 速度1400 / CFrameフライ方式
+-- ============================================================
 
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService = game:GetService("UserInputService")
-local TweenService = game:GetService("TweenService")
 local CoreGui = game:GetService("CoreGui")
+local TweenService = game:GetService("TweenService")
 local localPlayer = Players.LocalPlayer
 
 ------------------------------------------------------------------ 設定
 local CFG = {
-    SpeedCap = 1.15,
-    HopRatio = 1.515,
-    HopMin = 40,
-    HopGap = 0.06,
-    HopGapMin = 0.06,
-    HopGapMax = 0.2,
-    HopRetries = 6,
-    HopLift = 42,
-    LandOffset = 14,
-    LandSettle = 0.08,
-    DropDelay = 0.05,
+    Speed = 1400,
     GrabInterval = 0.03,
-    RegrabFar = 40,
-    Height = 70,
-    ClimbShare = 0.5,
-    CarryRatio = 0.9,
-    EasyRatio = 1.3,
-    -- ★ スピード移動設定
-    MoveSpeed = 2500,       -- 卵までの移動速度
-    MoveSlowDist = 80,      -- この距離から減速開始
-    MoveTimeout = 15,       -- 移動タイムアウト（秒）
-    MoveMinSpeed = 20,      -- 最小速度（ここまで減速）
+    GrabTimeout = 4,
+    PromptRadius = 12,
+    StealRadius = 61,
+    DropDelay = 0.15,
+    FlyTimeout = 20,
 }
-local FPS = { 60, 30, 0.15 }
+
+------------------------------------------------------------------ 色テーマ（ShouyuHub水色）
+local THEME = {
+    Bg          = Color3.fromRGB(10, 14, 20),
+    Panel       = Color3.fromRGB(16, 22, 30),
+    Card        = Color3.fromRGB(22, 30, 40),
+    Accent      = Color3.fromRGB(0, 200, 255),      -- 水色
+    AccentSoft  = Color3.fromRGB(100, 220, 255),
+    AccentDark  = Color3.fromRGB(0, 120, 180),
+    Text        = Color3.fromRGB(240, 250, 255),
+    TextDim     = Color3.fromRGB(150, 180, 200),
+    Stroke      = Color3.fromRGB(60, 100, 130),
+    On          = Color3.fromRGB(0, 220, 140),
+    Off         = Color3.fromRGB(80, 100, 120),
+}
 
 ------------------------------------------------------------------ ゲームハンドル
+local networking = ReplicatedStorage:WaitForChild("Packages"):WaitForChild("Networking")
+
 local function safeRequire(getter)
-    local ok, result = pcall(function() return require(getter()) end)
+    local ok, result = pcall(getter)
     return ok and result or nil
 end
 
-local networkingFolder = ReplicatedStorage:WaitForChild("Packages"):WaitForChild("Networking")
-local EggState = safeRequire(function() return ReplicatedStorage.Client.EggState end)
-local Assets = safeRequire(function() return ReplicatedStorage.Data.Assets end)
-local Mutations = safeRequire(function() return ReplicatedStorage.Shared.Modules.Mutations end)
+local EggState = safeRequire(function()
+    return require(ReplicatedStorage.Client.EggState)
+end)
+local Assets = safeRequire(function()
+    return require(ReplicatedStorage.Data.Assets)
+end)
+local Mutations = safeRequire(function()
+    return require(ReplicatedStorage.Shared.Modules.Mutations)
+end)
 
 local function remote(name)
-    return networkingFolder:FindFirstChild(name)
+    return networking:FindFirstChild(name)
 end
 
 local function root()
@@ -57,179 +64,21 @@ local function root()
     return character and character:FindFirstChild("HumanoidRootPart")
 end
 
-local function humanoid()
-    local character = localPlayer.Character
-    return character and character:FindFirstChildOfClass("Humanoid")
-end
------------------------------------------------------------------- シールド
-local shield = { Original = nil, Clone = nil, Links = {}, Connection = nil, Added = nil }
-
-local function walkSpeed()
-    local character = localPlayer.Character
-    local hum = character and character:FindFirstChildOfClass("Humanoid")
-    local speed = hum and hum.WalkSpeed or 16
-    if shield.Original and shield.Original.Health > 0 then
-        speed = math.min(speed, shield.Original.WalkSpeed)
-    end
-    local ok, result = pcall(function()
-        local stat = localPlayer:FindFirstChild("leaderstats")
-        stat = stat and stat:FindFirstChild("Speed")
-        local util = require(ReplicatedStorage.Shared.Util.TreadmillUtil)
-        return stat and util.SpeedPowerToWalkSpeed(stat.Value) or nil
-    end)
-    if ok and type(result) == "number" and result > 0 then
-        speed = math.min(speed, result)
-    end
-    return speed
-end
-
-local function shieldControls(hum)
-    pcall(function()
-        local scripts = localPlayer:FindFirstChild("PlayerScripts")
-        local module = scripts and scripts:FindFirstChild("PlayerModule")
-        if module then
-            local controls = require(module):GetControls()
-            if type(controls) == "table" then controls.humanoid = hum end
-        end
-    end)
-end
-
-local function shieldAnimate(character)
-    local animate = character and character:FindFirstChild("Animate")
-    if animate and animate:IsA("LocalScript") then
-        task.spawn(function()
-            animate.Enabled = false
-            task.wait()
-            animate.Enabled = true
-        end)
-    end
-end
-
-local function shieldUnlink()
-    for _, link in ipairs(shield.Links) do
-        pcall(function() link:Disconnect() end)
-    end
-    table.clear(shield.Links)
-end
-
-local groundedStates = {
-    [Enum.HumanoidStateType.Running] = true,
-    [Enum.HumanoidStateType.RunningNoPhysics] = true,
-    [Enum.HumanoidStateType.Landed] = true,
+------------------------------------------------------------------ 状態
+local state = {
+    Carrying = false,
+    Uid = nil,
+    Delivered = 0,
+    Busy = false,
+    Cancel = false,
+    Mult = 1,
+    PulledAt = 0,
 }
 
-local function grounded(hum)
-    if not hum or hum.Health <= 0 or hum.FloorMaterial == Enum.Material.Air then return false end
-    return groundedStates[hum:GetState()] == true
-end
-
-local function shieldSwap()
-    local character = localPlayer.Character
-    local hum = character and character:FindFirstChildOfClass("Humanoid")
-    if not hum or hum.Health <= 0 then return end
-    if shield.Clone and shield.Clone.Parent == character then return end
-    if not grounded(hum) then return end
-
-    local clone = hum:Clone()
-    hum.Parent = nil
-    clone.Parent = character
-    workspace.CurrentCamera.CameraSubject = clone
-    shieldControls(clone)
-    shieldAnimate(character)
-    shield.Original = hum
-    shield.Clone = clone
-
-    table.insert(shield.Links, hum:GetPropertyChangedSignal("WalkSpeed"):Connect(function()
-        if clone.Parent ~= nil then clone.WalkSpeed = hum.WalkSpeed end
-    end))
-
-    local animator = hum:FindFirstChildOfClass("Animator")
-    local animator2 = clone:FindFirstChildOfClass("Animator")
-    if animator and animator2 then
-        table.insert(shield.Links, animator.AnimationPlayed:Connect(function(played)
-            local animation = played.Animation
-            if not animation or clone.Parent == nil then return end
-            local ok, track = pcall(function() return animator2:LoadAnimation(animation) end)
-            if not ok or not track then return end
-            pcall(function()
-                track.Priority = played.Priority
-                track.Looped = played.Looped
-                track:Play(0.05, math.max(played.WeightTarget, 0.01), played.Speed)
-            end)
-            local stopped
-            stopped = played.Stopped:Connect(function()
-                stopped:Disconnect()
-                pcall(function() track:Stop(0.1) end)
-            end)
-        end))
-    end
-
-    table.insert(shield.Links, clone.Died:Connect(function()
-        shieldUnlink()
-        shield.Original, shield.Clone = nil, nil
-        local current = localPlayer.Character
-        if current and hum.Parent == nil then
-            hum.Parent = current
-            workspace.CurrentCamera.CameraSubject = hum
-            shieldControls(hum)
-        end
-        pcall(function() clone:Destroy() end)
-        hum.Health = 0
-    end))
-end
-
-local function shieldUndo()
-    shieldUnlink()
-    local character = localPlayer.Character
-    local original, clone = shield.Original, shield.Clone
-    shield.Original, shield.Clone = nil, nil
-    if original and clone and character and original.Parent == nil and clone.Parent == character then
-        original.Parent = character
-        workspace.CurrentCamera.CameraSubject = original
-        shieldControls(original)
-        pcall(function() clone:Destroy() end)
-        shieldAnimate(character)
-    end
-end
-
-local function shieldStart()
-    shieldSwap()
-    local n = 0
-    shield.Connection = RunService.Heartbeat:Connect(function(dt)
-        n += dt
-        local character = localPlayer.Character
-        local missing = not (shield.Clone and character and shield.Clone.Parent == character)
-        if (missing and 0.25 or 3) <= n then
-            n = 0
-            shieldSwap()
-        end
-    end)
-    shield.Added = localPlayer.CharacterAdded:Connect(function(character)
-        shieldUnlink()
-        shield.Original, shield.Clone = nil, nil
-        task.spawn(function()
-            character:WaitForChild("Humanoid", 10)
-            task.wait(1)
-            if shield.Connection and localPlayer.Character == character then
-                shieldSwap()
-            end
-        end)
-    end)
-end
-
-local function shieldStop()
-    if shield.Connection then shield.Connection:Disconnect(); shield.Connection = nil end
-    if shield.Added then shield.Added:Disconnect(); shield.Added = nil end
-    shieldUndo()
-end------------------------------------------------------------------ 状態
-local state = { Carrying = false, Uid = nil, Delivered = 0, Busy = false, Cancel = false, Mult = 1, PulledAt = 0, HeldSeen = 0, GuessedDrop = false }
-
-if type(EggState) == "table" and type(EggState.CarryChanged) == "table" and type(EggState.CarryChanged.Connect) == "function" then
+if type(EggState) == "table" and type(EggState.CarryChanged) == "table" then
     EggState.CarryChanged:Connect(function(arg)
         local carrying = type(arg) == "table" and arg.IsCarrying == true
         if carrying and arg.GuardDisabled == true then carrying = false end
-        state.GuessedDrop = false
-        if carrying then state.HeldSeen = os.clock() end
         if carrying and type(arg.Uid) == "string" then
             state.Uid = arg.Uid
             local mult = tonumber(arg.SpeedMultiplier)
@@ -240,87 +89,46 @@ if type(EggState) == "table" and type(EggState.CarryChanged) == "table" and type
 end
 
 pcall(function()
-    remote("RE/EggWorld/FieldEggRedeemVerdict").OnClientEvent:Connect(function()
+    local ev = remote("RE/EggWorld/FieldEggRedeemVerdict")
+    if ev then ev.OnClientEvent:Connect(function()
         state.Delivered = os.clock()
-    end)
+    end) end
 end)
 
 pcall(function()
-    remote("RE/RigSync/Refresh").OnClientEvent:Connect(function(arg)
+    local ev = remote("RE/RigSync/Refresh")
+    if ev then ev.OnClientEvent:Connect(function(arg)
         if type(arg) == "table" and arg.Action == "Relocate" then
             state.PulledAt = os.clock()
         end
-    end)
-end)
-
+    end) end
+end)------------------------------------------------------------------ 卵情報
 local function takeEgg(uid)
-    if type(uid) == "string" and type(EggState) == "table" and type(EggState.CarryFieldEgg) == "function" then
+    if type(uid) == "string" and type(EggState) == "table"
+        and type(EggState.CarryFieldEgg) == "function" then
         pcall(EggState.CarryFieldEgg, uid)
     end
 end
 
 local function dropEgg()
-    if type(EggState) == "table" and type(EggState.DropFieldEgg) == "function" then
+    if type(EggState) == "table"
+        and type(EggState.DropFieldEgg) == "function" then
         pcall(EggState.DropFieldEgg, "PlayerRequest")
     end
 end
 
-local function promptNear(position, radius)
-    local best, bestDistance = nil, radius
-    for _, child in ipairs(workspace:GetChildren()) do
-        if child.Name == "SmartPromptPart" and child:IsA("BasePart") then
-            local prompt = child:FindFirstChild("CarryAreaEgg")
-            if prompt and prompt:IsA("ProximityPrompt") then
-                local distance = (child.Position - position).Magnitude
-                if distance < bestDistance then
-                    best, bestDistance = prompt, distance
-                end
-            end
-        end
-    end
-    return best
-end
-
-local function heldByMe(uid)
-    local character = localPlayer.Character
-    if type(uid) ~= "string" or not character then return false end
-    local egg = workspace:FindFirstChild(uid)
-    if not egg then return false end
-    for _, d in ipairs(egg:GetDescendants()) do
-        if d:IsA("WeldConstraint") or d:IsA("JointInstance") then
-            local ok, a, b = pcall(function() return d.Part0, d.Part1 end)
-            if ok and ((a and a:IsDescendantOf(character)) or (b and b:IsDescendantOf(character))) then
-                return true
-            end
-        end
-    end
-    return false
-end
-
-task.spawn(function()
-    while true do
-        task.wait(0.2)
-        if not state.Carrying then
-            if state.GuessedDrop and heldByMe(state.Uid) then
-                state.GuessedDrop, state.Carrying, state.HeldSeen = false, true, os.clock()
-            end
-        elseif heldByMe(state.Uid) then
-            state.HeldSeen = os.clock()
-        elseif os.clock() - state.HeldSeen > 0.8 then
-            state.Carrying, state.GuessedDrop = false, true
-        end
-    end
-end)
-
 local function snapshot()
     local list = {}
-    local ok, result = pcall(function()
-        return remote("RF/EggWorld/AskFieldEggSnapshot"):InvokeServer()
-    end)
+    local fn = remote("RF/EggWorld/AskFieldEggSnapshot")
+    if not fn or not fn:IsA("RemoteFunction") then return list end
+
+    local ok, result = pcall(function() return fn:InvokeServer() end)
     local records = ok and type(result) == "table" and result.Records or nil
     if type(records) ~= "table" then return list end
+
     for _, record in pairs(records) do
-        if type(record) == "table" and type(record.Uid) == "string"
+        if type(record) == "table"
+            and type(record.Uid) == "string"
             and (record.State == "Slot" or record.State == "Dropped")
             and typeof(record.BottomCFrame) == "CFrame" then
             list[#list + 1] = record
@@ -338,115 +146,48 @@ local function eggPosition(uid)
     return nil
 end
 
-local function describe(record)
-    local directory = type(Assets) == "table" and Assets.Directory or nil
-    local entry = type(directory) == "table" and directory[tostring(record.AssetCategory)] or nil
-    local info = { Uid = record.Uid, Category = tostring(record.AssetCategory), Name = tostring(record.AssetCategory), Icon = "", Rarity = 0, Value = 0 }
-    if type(entry) == "table" then
-        info.Name = tostring(entry.DisplayName or record.AssetCategory)
-        local icon = entry.Icon
-        if icon ~= nil and tostring(icon) ~= "" then
-            icon = tostring(icon)
-            info.Icon = tonumber(icon) and ("rbxassetid://" .. icon) or icon
+local function eggNow(uid, cache)
+    local node = workspace:FindFirstChild(uid)
+    local slots = workspace:FindFirstChild("AreaEggSlotsClient")
+    node = node or (slots and slots:FindFirstChild(uid))
+    if node then
+        local ok, pos = pcall(function() return node:GetPivot().Position end)
+        if ok and pos then
+            cache.Pos, cache.At = pos, os.clock()
+            return pos
         end
-        if type(entry.Rarity) == "table" then
-            info.Rarity = tonumber(entry.Rarity.RarityNumber or entry.Rarity.Rank) or 0
-        end
-        local scale = tonumber(record.AssetScale) or 1
-        local factor = scale > 5 and (scale / 5) ^ 1.2 * 19.637875755794113 or scale ^ 1.85
-        local mutation = 1
-        if type(Mutations) == "table" and type(Mutations.EarningsFor) == "function" then
-            local okM, resM = pcall(Mutations.EarningsFor, type(record.Mutations) == "table" and record.Mutations or {})
-            if okM and type(resM) == "number" then mutation = resM end
-        end
-        info.Value = (tonumber(entry.EarningRate) or 0) * factor * mutation
     end
-    return info
-end
-
-local function money(value)
-    local units = { { 1e12, "T" }, { 1e9, "B" }, { 1e6, "M" }, { 1e3, "K" } }
-    for _, u in ipairs(units) do
-        if value >= u[1] then return string.format("$%.2f%s/s", value / u[1], u[2]) end
+    if os.clock() - cache.At >= 0.5 then
+        cache.At = os.clock()
+        cache.Pos = eggPosition(uid) or cache.Pos
     end
-    return string.format("$%d/s", math.floor(value + 0.5))
-	end
-	------------------------------------------------------------------ ユーティリティ
-local status = function(text) end
-
-local function frozenCamera()
-    local camera = workspace.CurrentCamera
-    if not camera then return function() end end
-    local oldType = camera.CameraType
-    local frame = camera.CFrame
-    pcall(function()
-        camera.CameraType = Enum.CameraType.Scriptable
-        camera.CFrame = frame
-    end)
-    return function()
-        pcall(function() camera.CameraType = oldType end)
-    end
+    return cache.Pos
 end
 
-local fpsGen = 0
-local function fpsOn()
-    if typeof(setfpscap) ~= "function" then return end
-    fpsGen += 1
-    local mine = fpsGen
-    task.spawn(function()
-        local high = true
-        local started = os.clock()
-        while fpsGen == mine and os.clock() - started < 60 do
-            pcall(setfpscap, high and FPS[1] or FPS[2])
-            high = not high
-            task.wait(FPS[3])
-        end
-    end)
-end
-
-local function fpsOff()
-    fpsGen += 1
-    if typeof(setfpscap) == "function" then pcall(setfpscap, 240) end
-end
-
-local stealClone = nil
-local function dropClone()
-    local copy = stealClone
-    stealClone = nil
-    if copy then pcall(function() copy:Destroy() end) end
-end
-
-local function postClone()
-    dropClone()
-    local character = localPlayer.Character
-    if not character then return end
-    local was = character.Archivable
-    character.Archivable = true
-    local copy = character:Clone()
-    character.Archivable = was
-    if copy then
-        for _, d in ipairs(copy:GetDescendants()) do
-            if d:IsA("LuaSourceContainer") or d:IsA("Humanoid") then
-                pcall(function() d:Destroy() end)
-            elseif d:IsA("BasePart") then
-                d.Anchored = true
-                d.CanCollide = false
-                d.CanTouch = false
-                d.CanQuery = false
+local function promptNear(position, radius)
+    local best, bestDistance = nil, radius or 12
+    for _, child in ipairs(workspace:GetChildren()) do
+        if child.Name == "SmartPromptPart" and child:IsA("BasePart") then
+            local prompt = child:FindFirstChild("CarryAreaEgg")
+            if prompt and prompt:IsA("ProximityPrompt") then
+                local distance = (child.Position - position).Magnitude
+                if distance < bestDistance then
+                    best, bestDistance = prompt, distance
+                end
             end
         end
-        copy.Name = "Clone"
-        copy.Parent = workspace
-        stealClone = copy
     end
+    return best
 end
 
+------------------------------------------------------------------ 座標系
 local function lineInfo()
     local world = workspace:FindFirstChild("World") or workspace:FindFirstChild("__OBJECTS")
     world = world and world:FindFirstChild("Areas")
     world = world and world:FindFirstChild("SeparationLine")
     local ok = world and world:IsA("BasePart")
-    return ok and world.Position.X or 552.2, ok and world.Position.Y or 67.67
+    return ok and world.Position.X or 552.2,
+           ok and world.Position.Y or 67.67
 end
 
 local function homePoint()
@@ -466,222 +207,121 @@ local function homePoint()
     return Vector3.new(528.7, 70.57, -364.11)
 end
 
-local function place(position)
-    local r = root()
-    if not r then return end
-    pcall(function()
-        r.CFrame = CFrame.new(position) * CFrame.Angles(0, math.rad(90), 0)
-        r.AssemblyLinearVelocity = Vector3.zero
-        r.AssemblyAngularVelocity = Vector3.zero
-    end)
+local function describe(record)
+    local directory = type(Assets) == "table" and Assets.Directory or nil
+    local entry = type(directory) == "table" and directory[tostring(record.AssetCategory)] or nil
+    local info = {
+        Uid = record.Uid,
+        Name = tostring(record.AssetCategory),
+        Icon = "", Rarity = 0, Value = 0,
+    }
+    if type(entry) == "table" then
+        info.Name = tostring(entry.DisplayName or record.AssetCategory)
+        local icon = entry.Icon
+        if icon ~= nil and tostring(icon) ~= "" then
+            icon = tostring(icon)
+            info.Icon = tonumber(icon) and ("rbxassetid://" .. icon) or icon
+        end
+        if type(entry.Rarity) == "table" then
+            info.Rarity = tonumber(entry.Rarity.RarityNumber or entry.Rarity.Rank) or 0
+        end
+        local scale = tonumber(record.AssetScale) or 1
+        local factor = scale > 5 and (scale / 5) ^ 1.2 * 19.637875755794113 or scale ^ 1.85
+        local mutation = 1
+        if type(Mutations) == "table" and type(Mutations.EarningsFor) == "function" then
+            local okM, resM = pcall(Mutations.EarningsFor,
+                type(record.Mutations) == "table" and record.Mutations or {})
+            if okM and type(resM) == "number" then mutation = resM end
+        end
+        info.Value = (tonumber(entry.EarningRate) or 0) * factor * mutation
+    end
+    return info
 end
 
-local dangerCache, dangerAt = {}, 0
-local function dangers()
-    if os.clock() - dangerAt < 1 then return dangerCache end
-    dangerAt = os.clock()
-    local list = {}
-    local function add(inst)
-        local ok, cf, size = pcall(function()
-            if inst:IsA("Model") then return inst:GetBoundingBox()
-            elseif inst:IsA("BasePart") then return inst.CFrame, inst.Size end
-        end)
-        if ok and cf and size then
-            local half = Vector3.new(math.abs(size.X), 0, math.abs(size.Z)) * 0.5
-            local rot = (cf - cf.Position):VectorToWorldSpace(half)
-            local rx = math.max(math.abs(rot.X), half.X, half.Z)
-            local rz = math.max(math.abs(rot.Z), half.X, half.Z)
-            list[#list + 1] = { MinX = cf.Position.X - rx, MaxX = cf.Position.X + rx, MinZ = cf.Position.Z - rz, MaxZ = cf.Position.Z + rz }
-        end
+local function money(value)
+    local units = { { 1e12, "T" }, { 1e9, "B" }, { 1e6, "M" }, { 1e3, "K" } }
+    for _, u in ipairs(units) do
+        if value >= u[1] then return string.format("$%.2f%s/s", value / u[1], u[2]) end
     end
-    local function bad(name)
-        if name == "ScrambleLocalVisuals" or name == "DrScrambleEvent" then return false end
-        name = string.lower(name)
-        return string.find(name, "portal", 1, true) or string.find(name, "teleport", 1, true)
-            or string.find(name, "mech", 1, true) or string.find(name, "arena", 1, true)
-            or string.find(name, "scramble", 1, true)
-    end
-    for _, child in ipairs(workspace:GetChildren()) do
-        if (child:IsA("Model") or child:IsA("BasePart") or child:IsA("Folder")) and bad(child.Name) then
-            if child:IsA("Folder") then
-                for _, inner in ipairs(child:GetChildren()) do add(inner) end
-            else
-                add(child)
-            end
-        end
-    end
-    local build = workspace:FindFirstChild("World")
-    build = build and build:FindFirstChild("Build")
-    if build then
-        for _, child in ipairs(build:GetChildren()) do
-            if bad(child.Name) then
-                for _, inner in ipairs(child:GetChildren()) do add(inner) end
-            end
-        end
-    end
-    dangerCache = list
-    return list
-end
+    return string.format("$%d/s", math.floor(value + 0.5))
+end------------------------------------------------------------------ 空中フライ移動
+local flyState = { Cancel = false }
 
-local function avoid(from, to)
-    for _, d in ipairs(dangers()) do
-        local x0, x1, z0, z1 = d.MinX - 12, d.MaxX + 12, d.MinZ - 12, d.MaxZ + 12
-        local inside = from.X >= x0 and from.X <= x1 and from.Z >= z0 and from.Z <= z1
-        if not inside then
-            local t0, t1, hit = 0, 1, true
-            for _, axis in ipairs({ { from.X, to.X - from.X, x0, x1 }, { from.Z, to.Z - from.Z, z0, z1 } }) do
-                local pos, delta, lo, hi = axis[1], axis[2], axis[3], axis[4]
-                if math.abs(delta) < 1e-6 then
-                    if pos < lo or pos > hi then hit = false end
-                else
-                    local ta, tb = (lo - pos) / delta, (hi - pos) / delta
-                    if ta > tb then ta, tb = tb, ta end
-                    t0, t1 = math.max(t0, ta), math.min(t1, tb)
-                    if t0 > t1 then hit = false end
-                end
-            end
-            if hit then
-                local zLow, zHigh = z0 - 2, z1 + 2
-                local z = math.abs(from.Z - zLow) <= math.abs(from.Z - zHigh) and zLow or zHigh
-                if z < -440 or z > -290 then z = z == zLow and zHigh or zLow end
-                local x = math.abs(from.X - x0) <= math.abs(from.X - x1) and x0 or x1
-                if math.abs(from.Z - z) < 3 then
-                    x = math.abs(to.X - x0) <= math.abs(to.X - x1) and x0 or x1
-                end
-                return Vector3.new(x, to.Y, z)
-            end
-        end
-    end
-    return to
-	end
-	------------------------------------------------------------------ ★ 速度2500で卵まで移動
-local function speedRunToEgg(uid, egg)
+local function cancelFly() flyState.Cancel = true end
+local function resetFly() flyState.Cancel = false end
+
+local function flyTo(target, onCancelCheck)
     local character = localPlayer.Character
-    local hum = character and character:FindFirstChildOfClass("Humanoid")
-    if not hum then return false end
+    local myRoot = root()
+    if not character or not myRoot then return false end
 
-    hum.PlatformStand = false
-    if character:FindFirstChildWhichIsA("Tool") then
-        pcall(function() hum:UnequipTools() end)
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if humanoid then
+        pcall(function() humanoid.PlatformStand = true end)
     end
 
     local started = os.clock()
-    local lastTake = 0
-    local lastPos = nil
-    local stuckTime = 0
+    local result = false
+    local lastMark = nil
+    local lastClock = 0
 
-    while os.clock() - started < CFG.MoveTimeout and not state.Cancel do
+    while os.clock() - started < CFG.FlyTimeout do
+        if flyState.Cancel then break end
+        if type(onCancelCheck) == "function" and onCancelCheck() then break end
+
         local r = root()
-        if not r then break end
+        if not r or not r.Parent then break end
 
-        -- 卵の現在位置を取得（毎フレーム更新）
-        local target = egg
-        local node = workspace:FindFirstChild(uid)
-        local slots = workspace:FindFirstChild("AreaEggSlotsClient")
-        node = node or (slots and slots:FindFirstChild(uid))
-        if node then
-            local okP, pos = pcall(function() return node:GetPivot().Position end)
-            if okP and pos then target = pos end
-        end
+        local delta = target - r.Position
+        local dist = delta.Magnitude
+        if dist <= 2 then result = true; break end
 
-        local flat = Vector3.new(target.X - r.Position.X, 0, target.Z - r.Position.Z)
-        local dist = flat.Magnitude
+        local dir = dist > 0.01 and delta.Unit or Vector3.zero
+        local step = CFG.Speed * (1 / 60)
+        if step > dist then step = dist end
 
-        if dist <= 2.5 then break end
+        local nextPos = r.Position + dir * step
 
-        local dir = dist > 0.01 and flat.Unit or Vector3.zero
-
-        -- 距離に応じて減速（二次関数的）
-        local speed = CFG.MoveSpeed
-        if dist < CFG.MoveSlowDist then
-            local ratio = dist / CFG.MoveSlowDist
-            speed = math.max(CFG.MoveMinSpeed, CFG.MoveSpeed * ratio * ratio)
-        end
-
-        -- Y座標を維持しつつ水平速度を直接セット
         pcall(function()
-            local curY = r.AssemblyLinearVelocity.Y
-            r.AssemblyLinearVelocity = Vector3.new(dir.X * speed, curY, dir.Z * speed)
+            r.CFrame = CFrame.new(nextPos) * r.CFrame.Rotation
+            r.AssemblyLinearVelocity = Vector3.zero
             r.AssemblyAngularVelocity = Vector3.zero
         end)
 
-        -- プロンプト発火
-        if dist <= 10 and os.clock() - lastTake > 0.05 then
-            lastTake = os.clock()
-            local prompt = promptNear(target - Vector3.new(0, 3, 0), 14)
-            if prompt and typeof(fireproximityprompt) == "function" then
-                pcall(function() prompt.HoldDuration = 0 end)
-                pcall(fireproximityprompt, prompt)
-            end
-            task.spawn(takeEgg, uid)
+        if lastMark and (r.Position - lastMark).Magnitude < 1 then
+            if os.clock() - lastClock > 0.5 then break end
+        else
+            lastMark = r.Position
+            lastClock = os.clock()
         end
-
-        -- スタック検知（速度が2500なのに進まないなら何かに引っかかってる）
-        if lastPos then
-            local moved = (r.Position - lastPos).Magnitude
-            if moved < 0.5 then
-                stuckTime += 1/60
-                if stuckTime > 0.5 then
-                    -- 少しY座標を上げて壁を越える
-                    pcall(function()
-                        r.CFrame = r.CFrame + Vector3.new(0, 5, 0)
-                    end)
-                    stuckTime = 0
-                end
-            else
-                stuckTime = 0
-            end
-        end
-        lastPos = r.Position
 
         RunService.Heartbeat:Wait()
     end
 
-    -- 停止
-    local r = root()
-    if r then
-        pcall(function()
-            r.AssemblyLinearVelocity = Vector3.zero
-            r.AssemblyAngularVelocity = Vector3.zero
-        end)
+    if humanoid then
+        pcall(function() humanoid.PlatformStand = false end)
     end
-    local finalR = root()
-    local finalDist = finalR and Vector3.new(egg.X - finalR.Position.X, 0, egg.Z - finalR.Position.Z).Magnitude or 999
-    return state.Carrying or finalDist <= 6
+
+    return result
 end
 
------------------------------------------------------------------- グラブ関連
-local function eggNow(uid, cache)
-    local node = workspace:FindFirstChild(uid)
-    local slots = workspace:FindFirstChild("AreaEggSlotsClient")
-    node = node or (slots and slots:FindFirstChild(uid))
-    if node then
-        local ok, pos = pcall(function() return node:GetPivot().Position end)
-        if ok and pos then
-            cache.Pos, cache.At = pos, os.clock()
-            return pos
-        end
-    end
-    if os.clock() - cache.At >= 0.5 then
-        cache.At = os.clock()
-        cache.Pos = eggPosition(uid) or cache.Pos
-    end
-    return cache.Pos
-end
-
+------------------------------------------------------------------ 掴む
 local function grab(uid, timeout)
+    timeout = timeout or CFG.GrabTimeout
     local cache = { At = 0 }
     local waited, since = 0, 1
+
     while not state.Carrying and waited < timeout and not state.Cancel do
         local r = root()
         local egg = eggNow(uid, cache)
-        local dt = math.max(RunService.Heartbeat:Wait(), 1 / 240)
+        local dt = math.max(RunService.Heartbeat:Wait(), 1/240)
         waited += dt
         since += dt
+
         if r and egg then
             local delta = egg - r.Position
             if delta.Magnitude > 2 then
-                local pace = math.max(walkSpeed() * CFG.SpeedCap, 16)
+                local pace = 200
                 local v = delta / math.max(0.08, dt)
                 if v.Magnitude > pace then v = v.Unit * pace end
                 pcall(function()
@@ -691,7 +331,7 @@ local function grab(uid, timeout)
             end
             if since >= CFG.GrabInterval then
                 since = 0
-                local prompt = promptNear(egg - Vector3.new(0, 3, 0), 12)
+                local prompt = promptNear(egg - Vector3.new(0, 3, 0), CFG.PromptRadius)
                 if prompt and typeof(fireproximityprompt) == "function" then
                     pcall(function() prompt.HoldDuration = 0 end)
                     pcall(fireproximityprompt, prompt)
@@ -703,248 +343,46 @@ local function grab(uid, timeout)
             task.spawn(takeEgg, uid)
         end
     end
+
     local r = root()
     if r then pcall(function() r.AssemblyLinearVelocity = Vector3.zero end) end
     return state.Carrying and state.Uid == uid
 end
 
-local function regrab(uid)
-    if state.Carrying then return true end
-    local r = root()
-    local egg = eggPosition(uid)
-    if r and egg and Vector3.new(r.Position.X - egg.X, 0, r.Position.Z - egg.Z).Magnitude > CFG.RegrabFar then
-        status("卵が遠くに落ちました。テレポートします")
-        place(egg + Vector3.new(0, 3, 0))
-    else
-        status("卵が近くに落ちました。回収します")
-    end
-    return grab(uid, 3)
-end
-
-local function groundY(position, fallback)
-    local y = fallback
-    pcall(function()
-        local params = RaycastParams.new()
-        params.FilterType = Enum.RaycastFilterType.Exclude
-        params.FilterDescendantsInstances = { localPlayer.Character }
-        params.IgnoreWater = true
-        local hit = workspace:Raycast(position + Vector3.new(0, 60, 0), Vector3.new(0, -140, 0), params)
-        if hit and hit.Material ~= Enum.Material.Water and math.abs(hit.Position.Y - fallback) < 40 then
-            y = hit.Position.Y + 3.5
-        end
-    end)
-    return y
-	end
-	------------------------------------------------------------------ 納品ロジック
-local function carrySpeed(distance)
-    local ws = walkSpeed()
-    local base = ws * math.min(CFG.CarryRatio, CFG.SpeedCap) * state.Mult
-    local fast = base * 1.5
-    local excess = 5.5 * base
-    local limit = fast
-    if distance and distance > excess then
-        limit = math.min(fast, base * distance / (distance - excess))
-    end
-    return math.min(math.max(math.min(base * CFG.EasyRatio, limit), base), math.max(ws * CFG.SpeedCap, base))
-end
-
-local function runHome(lineX, laneZ)
+------------------------------------------------------------------ 納品
+local function flyHome(lineX)
     local started = os.clock()
     local home = homePoint()
-    local checkpoint = lineX - 7
-    local height = CFG.Height
-    local share = math.clamp(CFG.ClimbShare, 0.1, 0.9)
-    local descent = height * math.sqrt(1 - share * share) / share
-    local character = localPlayer.Character
-    local hum = character and character:FindFirstChildOfClass("Humanoid")
-    if hum then hum.PlatformStand = false end
 
-    local r = root()
-    if r and character and height > 0.5 and home.Y + height - 2 > r.Position.Y then
-        pcall(function()
-            character:PivotTo(CFrame.new(Vector3.new(r.Position.X, home.Y + height, r.Position.Z)) * r.CFrame.Rotation)
-            r.AssemblyLinearVelocity = Vector3.zero
-            r.AssemblyAngularVelocity = Vector3.zero
-        end)
+    local ok = flyTo(home + Vector3.new(0, 3, 0), function()
+        return state.Delivered >= started or not state.Carrying
+    end)
+
+    if not ok and not state.Carrying then
+        return state.Delivered >= started
     end
 
-    local start = root()
-    local speed = carrySpeed(start and (Vector3.new(start.Position.X - home.X, 0, start.Position.Z - home.Z).Magnitude + math.max(0, height) * 2) or nil)
-
-    local last = os.clock()
-    local timeout = 0
-    status("セーフゾーン")
-    while state.Carrying and state.Delivered < started and not state.Cancel and timeout < 25 do
-        r = root()
-        if not r then return false end
-        local now = os.clock()
-        local dt = math.max(now - last, 1 / 240)
-        last = now
-        timeout += dt
-
-        local toHome = r.Position.X <= checkpoint + 2
-        local target = toHome and home or Vector3.new(checkpoint, home.Y, laneZ)
-        if toHome and Vector3.new(home.X - r.Position.X, 0, home.Z - r.Position.Z).Magnitude < 2 then break end
-
-        local aim = avoid(r.Position, target)
-        local flat = Vector3.new(aim.X - r.Position.X, 0, aim.Z - r.Position.Z)
-        local remaining = toHome and 0 or math.max(0, r.Position.X - checkpoint)
-        local wantY = home.Y + height
-        if toHome or remaining <= descent then
-            wantY = home.Y + height * math.clamp(remaining / math.max(descent, 1), 0, 1)
-        end
-        local vy = math.clamp((wantY - r.Position.Y) / 0.12, -speed * share, speed * share)
-        local horizontal = math.sqrt(math.max(speed * speed - vy * vy, 0))
-        local v = flat.Magnitude > 0.01 and flat.Unit * math.min(horizontal, flat.Magnitude / 0.05) or Vector3.zero
-        pcall(function()
-            r.AssemblyLinearVelocity = Vector3.new(v.X, vy, v.Z)
-        end)
-        RunService.Heartbeat:Wait()
-    end
-
-    if hum then pcall(function() hum:Move(Vector3.zero, false) end) end
-
-    local settle = 0
-    while settle < 2 and state.Delivered < started and state.Carrying and not state.Cancel do
-        settle += RunService.Heartbeat:Wait()
-    end
-    if state.Carrying and state.Delivered < started and not state.Cancel then
-        task.wait(0.2)
+    if state.Carrying then
+        task.wait(CFG.DropDelay)
         dropEgg()
         local waited = 0
-        while state.Delivered < started and waited < 1 do
+        while state.Delivered < started and waited < 1.5 do
             waited += RunService.Heartbeat:Wait()
         end
     end
     return state.Delivered >= started
-end
-
-local function instantTP(uid)
-    local started = os.clock()
-    local lineX, lineY = lineInfo()
-    local r = root()
-    if not r then return false end
-    local laneZ = math.clamp(r.Position.Z, -425, -300)
-    local landing = Vector3.new(lineX + CFG.LandOffset, lineY + 3.35, laneZ)
-
-    local hopStep = math.max(walkSpeed() * CFG.HopRatio, CFG.HopMin)
-    local hopY = r.Position.Y + CFG.HopLift
-    local x = r.Position.X
-    local retries = 0
-    local releaseCamera = frozenCamera()
-    state.ReleaseCamera = releaseCamera
-    pcall(postClone)
-    fpsOn()
-
-    while x - hopStep > landing.X and not state.Cancel do
-        if not state.Carrying then
-            if not regrab(uid) then break end
-            local current = root()
-            if current then x = math.min(x, current.Position.X) end
-            continue
-        end
-        local nextX = x - hopStep
-        status(string.format("瞬間移動: ホームへ跳躍中, X %d", math.floor(nextX)))
-        local pulledBefore = state.PulledAt
-        local held = 0
-        while held < CFG.HopGap do
-            place(Vector3.new(nextX, hopY, laneZ))
-            held += RunService.Heartbeat:Wait()
-        end
-        local check = root()
-        local pulled = state.PulledAt > pulledBefore or (check ~= nil and (check.Position.X - nextX > 10 or check.AssemblyLinearVelocity.Magnitude > 150))
-        if pulled and state.Carrying and not state.Cancel then
-            retries += 1
-            CFG.HopGap = math.min(CFG.HopGapMax, CFG.HopGap + 0.02)
-            if retries > CFG.HopRetries then break end
-            status(string.format("瞬間移動: 引き戻されました, リトライ %d/%d", retries, CFG.HopRetries))
-            local settle = 0
-            while settle < 0.12 and not state.Cancel do
-                place(Vector3.new(x, hopY, laneZ))
-                settle += RunService.Heartbeat:Wait()
-            end
-        else
-            x = nextX
-            CFG.HopGap = math.max(CFG.HopGapMin, CFG.HopGap - 0.01)
-        end
-    end
-
-    status("瞬間移動: ラインの隣に着地")
-    landing = Vector3.new(landing.X, groundY(landing, landing.Y), landing.Z)
-    local function land()
-        local current = root()
-        if current and current.Position.X <= landing.X + 1 and current.Position.Y > landing.Y - 25 then
-            pcall(function() current.AssemblyLinearVelocity = Vector3.zero end)
-            return
-        end
-        place(landing)
-    end
-    land()
-    for attempt = 1, 3 do
-        local settle = 0
-        while settle < CFG.LandSettle and not state.Cancel do
-            settle += RunService.Heartbeat:Wait()
-        end
-        local landed = root()
-        if state.Carrying and landed and (landed.Position.X - landing.X > 12 or landed.Position.Y < landing.Y - 25) then
-            status("瞬間移動: 着地リトライ " .. attempt)
-            land()
-        else
-            break
-        end
-    end
-    dropClone()
-
-    if state.Carrying and not state.Cancel then
-        local delay = 0
-        while delay < CFG.DropDelay do
-            delay += RunService.Heartbeat:Wait()
-        end
-        status("瞬間移動: 卵をドロップ")
-        dropEgg()
-        local waited = 0
-        while state.Carrying and waited < 1 and not state.Cancel do
-            waited += RunService.Heartbeat:Wait()
-        end
-        local current = root()
-        if current then
-            pcall(function()
-                current.AssemblyLinearVelocity = Vector3.zero
-                current.AssemblyAngularVelocity = Vector3.zero
-            end)
-        end
-        releaseCamera()
-        dropClone()
-        status("瞬間移動: 卵を回収")
-        if not grab(uid, 3) and not regrab(uid) then
-            fpsOff()
-            status("卵を回収できませんでした")
-            return false
-        end
-        dropClone()
-    end
-    releaseCamera()
-
-    local ok = false
-    if state.Carrying then
-        ok = runHome(lineX, laneZ)
-    end
-    fpsOff()
-    return ok or state.Delivered >= started
-end
-
+	end------------------------------------------------------------------ メイン処理
 local function stealAndDeliver(uid)
     if state.Busy then return end
     state.Busy = true
     state.Cancel = false
+    resetFly()
+
     task.spawn(function()
         local ok, err = pcall(function()
-            status("卵を探しています")
             local egg = eggPosition(uid)
-            if not egg then
-                status("卵が消えました")
-                return
-            end
+            if not egg then return end
+
             if state.Carrying and state.Uid ~= uid then
                 dropEgg()
                 local waited = 0
@@ -952,399 +390,441 @@ local function stealAndDeliver(uid)
                     waited += RunService.Heartbeat:Wait()
                 end
             end
-            fpsOn()
-            status("卵の場所へ移動中")
-            if not speedRunToEgg(uid, egg) then
-                fpsOff()
-                status("卵にたどり着けません")
-                return
+
+            if not flyTo(egg + Vector3.new(0, 3, 0)) then
+                local live = eggNow(uid, { At = 0 })
+                if live then flyTo(live + Vector3.new(0, 3, 0)) end
             end
-            status("卵を掴んでいます")
-            if not grab(uid, 4) then
-                fpsOff()
-                status("卵が外れません")
-                return
-            end
-            local delivered = instantTP(uid)
-            status(delivered and "納品完了" or "納品失敗")
+
+            if not grab(uid, CFG.GrabTimeout) then return end
+
+            local lineX = lineInfo()
+            flyHome(lineX)
         end)
-        fpsOff()
-        dropClone()
-        if state.ReleaseCamera then
-            pcall(state.ReleaseCamera)
-            state.ReleaseCamera = nil
-        end
-        if not ok then
-            status("エラー: " .. tostring(err))
-        end
+
+        if not ok then warn("[Steal] " .. tostring(err)) end
         state.Busy = false
     end)
-	end------------------------------------------------------------------ UI: 大型化 + 日本語化
-local WHITE = Color3.fromRGB(255, 255, 255)
-local SILVER = Color3.fromRGB(150, 150, 156)
-local STEEL = Color3.fromRGB(70, 70, 76)
-local BG = Color3.fromRGB(0, 0, 0)
-local RARITY_COLORS = {
-    Color3.fromRGB(190, 190, 190), Color3.fromRGB(110, 210, 110), Color3.fromRGB(90, 160, 255),
-    Color3.fromRGB(190, 110, 255), Color3.fromRGB(255, 170, 50), Color3.fromRGB(255, 80, 80),
-    Color3.fromRGB(255, 90, 200), Color3.fromRGB(80, 235, 235),
-}
-
-local JA = {
-    ["Pick a pet"] = "ペットを選択",
-    ["Looking for the egg"] = "卵を探しています",
-    ["Going to the egg"] = "卵の場所へ移動中",
-    ["Taking the egg"] = "卵を掴んでいます",
-    ["Delivered"] = "納品完了",
-    ["Delivery failed"] = "納品失敗",
-    ["That egg is gone"] = "卵が消えました",
-    ["Could not reach the egg"] = "卵にたどり着けません",
-    ["The egg would not come free"] = "卵が外れません",
-    ["Cancelling"] = "キャンセル中",
-    ["Something went wrong"] = "問題が発生しました",
-    ["Delivering"] = "納品中",
-    ["Safe zone"] = "セーフゾーン",
-    ["Refresh"] = "更新",
-    ["Steal"] = "盗む",
-    ["Cancel"] = "キャンセル",
-    ["Could not take the egg back"] = "卵を回収できませんでした",
-}
-
-local function jp(msg)
-    msg = tostring(msg)
-    for k, v in pairs(JA) do
-        if msg == k then return v end
-    end
-    for k, v in pairs(JA) do
-        if string.sub(msg, 1, #k) == k then
-            return v .. string.sub(msg, #k + 1)
-        end
-    end
-    return msg
 end
 
-local function parentGui()
-    if typeof(gethui) == "function" then
-        local ok, result = pcall(gethui)
-        if ok and typeof(result) == "Instance" then return result end
-    end
-    return CoreGui
-end
+------------------------------------------------------------------ ターゲット選択
+local function pickTarget()
+    local best, bestValue = nil, -1
+    local myRoot = root()
+    local myPos = myRoot and myRoot.Position
 
-local function make(class, props)
-    local inst = Instance.new(class)
-    for k, v in pairs(props or {}) do inst[k] = v end
-    return inst
-end
-
-local function corner(parent, radius)
-    make("UICorner", { CornerRadius = UDim.new(0, radius or 6) }).Parent = parent
-end
-
-local living = {}
-local function bands(a, b)
-    return ColorSequence.new({
-        ColorSequenceKeypoint.new(0, a), ColorSequenceKeypoint.new(0.25, b), ColorSequenceKeypoint.new(0.5, a),
-        ColorSequenceKeypoint.new(0.75, b), ColorSequenceKeypoint.new(1, a),
-    })
-end
-
-local function livingStroke(parent, thickness, bright)
-    local s = make("UIStroke", { Thickness = thickness or 1, Color = WHITE, ApplyStrokeMode = Enum.ApplyStrokeMode.Border })
-    s.Parent = parent
-    local g = make("UIGradient", { Rotation = 45, Color = bands(bright and WHITE or SILVER, STEEL) })
-    g.Parent = s
-    living[#living + 1] = g
-    return s, g
-end
-
-local function livingText(label)
-    local g = make("UIGradient", { Color = bands(WHITE, SILVER) })
-    g.Parent = label
-    living[#living + 1] = g
-    return g
-end
-
-local function text(parent, props)
-    local alive = props.Living ~= false
-    props.Living = nil
-    props.BackgroundTransparency = 1
-    props.TextColor3 = props.TextColor3 or WHITE
-    local l = make("TextLabel", props)
-    l.Parent = parent
-    if alive then livingText(l) end
-    return l
-end
-
-local old = parentGui():FindFirstChild("yslemEgg")
-if old then old:Destroy() end
-
-local gui = make("ScreenGui", { Name = "yslemEgg", ResetOnSpawn = false, ZIndexBehavior = Enum.ZIndexBehavior.Sibling, IgnoreGuiInset = true })
-gui.Parent = parentGui()
-
--- ★大型化: 340 x 440
-local W, H, HEADER = 340, 440, 42
-local window = make("Frame", {
-    Size = UDim2.fromOffset(W, H),
-    Position = UDim2.new(0.5, -W / 2, 0.5, -H / 2),
-    BackgroundColor3 = BG, BorderSizePixel = 0, ClipsDescendants = false,
-})
-window.Parent = gui
-corner(window, 20)
-livingStroke(window, 1.5, true)
-
-local rotation = 0
-local tick = 0
-local shineConnection = RunService.Heartbeat:Connect(function(dt)
-    tick += 1
-    if tick % 2 ~= 0 then return end
-    rotation = (rotation + dt * 72) % 360
-    for _, g in ipairs(living) do
-        if g.Parent then
-            g.Rotation = g.Parent:IsA("UIStroke") and (45 + rotation) % 360 or rotation
-        end
-    end
-end)
-
--- ヘッダー
-local header = make("Frame", {
-    Size = UDim2.new(1, -12, 0, HEADER - 8), Position = UDim2.fromOffset(6, 6),
-    BackgroundColor3 = WHITE, BorderSizePixel = 0,
-})
-header.Parent = window
-corner(header, 12)
-do
-    local g = make("UIGradient", { Color = bands(WHITE, SILVER) })
-    g.Parent = header
-    living[#living + 1] = g
-end
-text(header, {
-    Size = UDim2.new(1, -80, 1, 0), Position = UDim2.fromOffset(14, 0),
-    Font = Enum.Font.GothamBlack, TextSize = 16,
-    TextColor3 = Color3.new(0, 0, 0), TextXAlignment = Enum.TextXAlignment.Left,
-    Text = "卵盗みツール", Living = false,
-})
-
-local function headerButton(label, offset)
-    local b = make("TextButton", {
-        Size = UDim2.fromOffset(30, 24), Position = UDim2.new(1, offset, 0.5, -12),
-        BackgroundColor3 = BG, Font = Enum.Font.GothamBold, TextSize = 14,
-        TextColor3 = WHITE, Text = label, AutoButtonColor = true,
-    })
-    b.Parent = header
-    corner(b, 8)
-    livingStroke(b, 1, true)
-    livingText(b)
-    return b
-end
-local minimize = headerButton("-", -70)
-local close = headerButton("x", -34)
-
-local body = make("Frame", {
-    Size = UDim2.new(1, -14, 1, -(HEADER + 12)), Position = UDim2.fromOffset(7, HEADER + 6),
-    BackgroundTransparency = 1,
-})
-body.Parent = window
-
-local list = make("ScrollingFrame", {
-    Size = UDim2.new(1, 0, 1, -100),
-    BackgroundColor3 = BG, BorderSizePixel = 0,
-    ScrollBarThickness = 4, ScrollBarImageColor3 = SILVER,
-    CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y,
-})
-list.Parent = body
-corner(list, 14)
-livingStroke(list, 1, false)
-make("UIListLayout", { Padding = UDim.new(0, 5), SortOrder = Enum.SortOrder.LayoutOrder }).Parent = list
-make("UIPadding", {
-    PaddingTop = UDim.new(0, 8), PaddingBottom = UDim.new(0, 8),
-    PaddingLeft = UDim.new(0, 8), PaddingRight = UDim.new(0, 10),
-}).Parent = list
-
-local statusLabel = text(body, {
-    Size = UDim2.new(1, 0, 0, 18), Position = UDim2.new(0, 0, 1, -88),
-    Font = Enum.Font.GothamBold, TextSize = 12,
-    TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
-    Text = "ペットを選択",
-})
-
-local PUBLIC = {
-    ["ペットを選択"] = true,
-    ["卵を探しています"] = true,
-    ["卵の場所へ移動中"] = true,
-    ["卵を掴んでいます"] = true,
-    ["納品完了"] = true,
-    ["納品失敗"] = true,
-    ["卵が消えました"] = true,
-    ["卵にたどり着けません"] = true,
-    ["卵が外れません"] = true,
-    ["キャンセル中"] = true,
-}
-status = function(msg)
-    msg = jp(tostring(msg))
-    if PUBLIC[msg] or string.sub(msg, 1, 7) == "選択中: " then
-        statusLabel.Text = msg
-    elseif string.sub(msg, 1, 5) == "エラー" or msg == "問題が発生しました" then
-        statusLabel.Text = "問題が発生しました"
-    elseif state.Busy then
-        statusLabel.Text = "納品中"
-    end
-end
-
-local function bigButton(label, position, size)
-    local b = make("TextButton", {
-        Size = size, Position = position, BackgroundColor3 = BG,
-        Font = Enum.Font.GothamBlack, TextSize = 17,
-        TextColor3 = WHITE, Text = label, AutoButtonColor = true,
-    })
-    b.Parent = body
-    corner(b, 17)
-    livingStroke(b, 1.5, true)
-    livingText(b)
-    return b
-end
-local refreshButton = bigButton("更新", UDim2.new(0, 0, 1, -66), UDim2.new(0.4, -3, 0, 58))
-local stealButton = bigButton("盗む", UDim2.new(0.4, 3, 1, -66), UDim2.new(0.6, -3, 0, 58))
-		------------------------------------------------------------------ UI後半
-local selectedUid = nil
-local rows = {}
-
-local function setSelected(uid)
-    selectedUid = uid
-    for rowUid, row in pairs(rows) do
-        local on = rowUid == uid
-        row.Stroke.Thickness = on and 2 or 1
-        row.Gradient.Color = on and bands(WHITE, STEEL) or bands(STEEL, Color3.fromRGB(30, 30, 34))
-    end
-end
-
-local function rebuild()
-    for _, row in pairs(rows) do row.Frame:Destroy() end
-    table.clear(rows)
-    for i = #living, 1, -1 do
-        if not living[i].Parent then table.remove(living, i) end
-    end
-
-    local infos = {}
     for _, record in ipairs(snapshot()) do
-        infos[#infos + 1] = describe(record)
+        local info = describe(record)
+        if myPos then
+            local dist = (record.BottomCFrame.Position - myPos).Magnitude
+            if dist > CFG.StealRadius then continue end
+        end
+        if info.Value > bestValue then
+            best = record
+            bestValue = info.Value
+        end
     end
-    table.sort(infos, function(a, b) return a.Value > b.Value end)
-
-    local still = false
-    for index, info in ipairs(infos) do
-        still = still or info.Uid == selectedUid
-        local frame = make("TextButton", {
-            Size = UDim2.new(1, 0, 0, 42), BackgroundColor3 = BG,
-            LayoutOrder = index, Text = "", AutoButtonColor = true,
-        })
-        frame.Parent = list
-        corner(frame, 12)
-        local rowStroke, rowGradient = livingStroke(frame, 1, false)
-
-        make("ImageLabel", {
-            Size = UDim2.fromOffset(34, 34), Position = UDim2.fromOffset(5, 4),
-            BackgroundTransparency = 1, Image = info.Icon, ScaleType = Enum.ScaleType.Fit,
-        }).Parent = frame
-
-        text(frame, {
-            Size = UDim2.new(1, -46, 0, 20), Position = UDim2.fromOffset(46, 4),
-            Font = Enum.Font.GothamBold, TextSize = 15,
-            TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
-            Text = info.Name,
-            TextColor3 = RARITY_COLORS[math.clamp(info.Rarity, 1, #RARITY_COLORS)] or WHITE,
-        })
-        text(frame, {
-            Size = UDim2.new(1, -46, 0, 16), Position = UDim2.fromOffset(46, 23),
-            Font = Enum.Font.GothamMedium, TextSize = 12,
-            TextXAlignment = Enum.TextXAlignment.Left, Text = money(info.Value),
-        })
-
-        rows[info.Uid] = { Frame = frame, Stroke = rowStroke, Gradient = rowGradient }
-        frame.MouseButton1Click:Connect(function()
-            setSelected(info.Uid)
-            status("選択中: " .. info.Name)
-        end)
-    end
-
-    setSelected(still and selectedUid or nil)
-    if #infos == 0 then status("ペットを選択") end
+    return best
 end
 
-refreshButton.MouseButton1Click:Connect(function()
-    if not state.Busy then rebuild() end
+------------------------------------------------------------------ オートループ
+local autoThread = nil
+local autoEnabled = false
+
+local function startAutoSteal()
+    if autoThread then return end
+    autoEnabled = true
+    autoThread = task.spawn(function()
+        while autoEnabled do
+            if not state.Busy then
+                local target = pickTarget()
+                if target then stealAndDeliver(target.Uid) end
+            end
+            task.wait(0.3)
+        end
+    end)
+end
+
+local function stopAutoSteal()
+    autoEnabled = false
+    state.Cancel = true
+    cancelFly()
+    autoThread = nil
+		end------------------------------------------------------------------ UI (ShouyuHub水色スタイル)
+local function makeUI()
+    local gui = Instance.new("ScreenGui")
+    gui.Name = "ShouyuStealUI"
+    gui.ResetOnSpawn = false
+    gui.IgnoreGuiInset = true
+    gui.DisplayOrder = 100
+    gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+
+    local ok = pcall(function()
+        if typeof(gethui) == "function" then gui.Parent = gethui()
+        else gui.Parent = CoreGui end
+    end)
+    if not ok then gui.Parent = localPlayer:WaitForChild("PlayerGui") end
+
+    local W, H = 360, 460
+    local main = Instance.new("Frame")
+    main.Size = UDim2.fromOffset(W, H)
+    main.Position = UDim2.new(0.5, -W/2, 0.5, -H/2)
+    main.BackgroundColor3 = THEME.Bg
+    main.BorderSizePixel = 0
+    main.Active = true
+    main.ClipsDescendants = true
+    main.Parent = gui
+
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 14)
+    corner.Parent = main
+
+    -- 外枠ストローク（水色グロー）
+    local stroke = Instance.new("UIStroke")
+    stroke.Color = THEME.Accent
+    stroke.Thickness = 1.5
+    stroke.Transparency = 0.3
+    stroke.Parent = main
+
+    -- 上部の水色ライン
+    local topLine = Instance.new("Frame")
+    topLine.Size = UDim2.new(1, -40, 0, 2)
+    topLine.Position = UDim2.new(0, 20, 0, 0)
+    topLine.BackgroundColor3 = THEME.Accent
+    topLine.BorderSizePixel = 0
+    topLine.ZIndex = 4
+    topLine.Parent = main
+
+    local tlGrad = Instance.new("UIGradient")
+    tlGrad.Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 1),
+        NumberSequenceKeypoint.new(0.5, 0),
+        NumberSequenceKeypoint.new(1, 1),
+    })
+    tlGrad.Parent = topLine
+
+    -- ヘッダー
+    local header = Instance.new("Frame")
+    header.Name = "Header"
+    header.Size = UDim2.new(1, -16, 0, 44)
+    header.Position = UDim2.fromOffset(8, 8)
+    header.BackgroundColor3 = THEME.Panel
+    header.BackgroundTransparency = 0.05
+    header.BorderSizePixel = 0
+    header.ZIndex = 5
+    header.Parent = main
+
+    local hCorner = Instance.new("UICorner")
+    hCorner.CornerRadius = UDim.new(0, 10)
+    hCorner.Parent = header
+
+    local hStroke = Instance.new("UIStroke")
+    hStroke.Color = THEME.AccentDark
+    hStroke.Thickness = 1.2
+    hStroke.Transparency = 0.4
+    hStroke.Parent = header
+
+    local title = Instance.new("TextLabel")
+    title.Size = UDim2.new(1, -20, 1, 0)
+    title.Position = UDim2.fromOffset(16, 0)
+    title.BackgroundTransparency = 1
+    title.Text = "SHOUYU STEAL HUB"
+    title.TextColor3 = THEME.AccentSoft
+    title.Font = Enum.Font.GothamBlack
+    title.TextSize = 16
+    title.TextXAlignment = Enum.TextXAlignment.Left
+    title.ZIndex = 6
+    title.Parent = header
+
+    local titleGrad = Instance.new("UIGradient")
+    titleGrad.Color = ColorSequence.new({
+        ColorSequenceKeypoint.new(0, THEME.AccentSoft),
+        ColorSequenceKeypoint.new(1, THEME.Accent),
+    })
+    titleGrad.Parent = title
+
+    -- ステータス
+    local status = Instance.new("TextLabel")
+    status.Name = "StatusLabel"
+    status.Size = UDim2.new(1, -20, 0, 20)
+    status.Position = UDim2.fromOffset(14, 56)
+    status.BackgroundTransparency = 1
+    status.Text = "速度: " .. CFG.Speed .. " / 待機中"
+    status.TextColor3 = THEME.TextDim
+    status.Font = Enum.Font.GothamMedium
+    status.TextSize = 12
+    status.TextXAlignment = Enum.TextXAlignment.Left
+    status.ZIndex = 6
+    status.Parent = main
+
+    -- 卵リスト
+    local list = Instance.new("ScrollingFrame")
+    list.Name = "EggList"
+    list.Size = UDim2.new(1, -20, 1, -190)
+    list.Position = UDim2.fromOffset(10, 82)
+    list.BackgroundColor3 = THEME.Panel
+    list.BackgroundTransparency = 0.15
+    list.BorderSizePixel = 0
+    list.ScrollBarThickness = 3
+    list.ScrollBarImageColor3 = THEME.Accent
+    list.CanvasSize = UDim2.new()
+    list.AutomaticCanvasSize = Enum.AutomaticSize.Y
+    list.ZIndex = 5
+    list.Parent = main
+
+    local lCorner = Instance.new("UICorner")
+    lCorner.CornerRadius = UDim.new(0, 10)
+    lCorner.Parent = list
+
+    local lStroke = Instance.new("UIStroke")
+    lStroke.Color = THEME.Stroke
+    lStroke.Thickness = 1
+    lStroke.Transparency = 0.5
+    lStroke.Parent = list
+
+    local lLayout = Instance.new("UIListLayout")
+    lLayout.Padding = UDim.new(0, 4)
+    lLayout.SortOrder = Enum.SortOrder.LayoutOrder
+    lLayout.Parent = list
+
+    local lPad = Instance.new("UIPadding")
+    lPad.PaddingTop = UDim.new(0, 6)
+    lPad.PaddingBottom = UDim.new(0, 6)
+    lPad.PaddingLeft = UDim.new(0, 6)
+    lPad.PaddingRight = UDim.new(0, 8)
+    lPad.Parent = list
+
+    -- レアリティ色
+    local RARITY = {
+        Color3.fromRGB(190, 190, 190),
+        Color3.fromRGB(110, 210, 110),
+        Color3.fromRGB(90, 160, 255),
+        Color3.fromRGB(190, 110, 255),
+        Color3.fromRGB(255, 170, 50),
+        Color3.fromRGB(255, 80, 80),
+        Color3.fromRGB(255, 90, 200),
+        Color3.fromRGB(80, 235, 235),
+    }
+
+    local selectedUid = nil
+    local rows = {}
+
+    local function setSelected(uid)
+        selectedUid = uid
+        for rowUid, row in pairs(rows) do
+            local on = rowUid == uid
+            row.Stroke.Thickness = on and 2 or 1
+            row.Stroke.Color = on and THEME.Accent or THEME.Stroke
+            row.Stroke.Transparency = on and 0 or 0.6
+        end
+    end
+
+    local function rebuild()
+        for _, row in pairs(rows) do row.Frame:Destroy() end
+        table.clear(rows)
+
+        local infos = {}
+        for _, record in ipairs(snapshot()) do
+            infos[#infos + 1] = describe(record)
+        end
+        table.sort(infos, function(a, b) return a.Value > b.Value end)
+
+        local still = false
+        for index, info in ipairs(infos) do
+            still = still or info.Uid == selectedUid
+
+            local frame = Instance.new("TextButton")
+            frame.Size = UDim2.new(1, 0, 0, 42)
+            frame.BackgroundColor3 = THEME.Card
+            frame.BorderSizePixel = 0
+            frame.Text = ""
+            frame.LayoutOrder = index
+            frame.AutoButtonColor = true
+            frame.Parent = list
+
+            local fCorner = Instance.new("UICorner")
+            fCorner.CornerRadius = UDim.new(0, 8)
+            fCorner.Parent = frame
+
+            local fStroke = Instance.new("UIStroke")
+            fStroke.Color = THEME.Stroke
+            fStroke.Thickness = 1
+            fStroke.Transparency = 0.6
+            fStroke.Parent = frame
+
+            local icon = Instance.new("ImageLabel")
+            icon.Size = UDim2.fromOffset(34, 34)
+            icon.Position = UDim2.fromOffset(4, 4)
+            icon.BackgroundTransparency = 1
+            icon.Image = info.Icon
+            icon.ScaleType = Enum.ScaleType.Fit
+            icon.Parent = frame
+
+            local name = Instance.new("TextLabel")
+            name.Size = UDim2.new(1, -46, 0, 20)
+            name.Position = UDim2.fromOffset(44, 3)
+            name.BackgroundTransparency = 1
+            name.Text = info.Name
+            name.TextColor3 = RARITY[math.clamp(info.Rarity, 1, #RARITY)] or THEME.Text
+            name.Font = Enum.Font.GothamBold
+            name.TextSize = 14
+            name.TextXAlignment = Enum.TextXAlignment.Left
+            name.TextTruncate = Enum.TextTruncate.AtEnd
+            name.Parent = frame
+
+            local value = Instance.new("TextLabel")
+            value.Size = UDim2.new(1, -46, 0, 15)
+            value.Position = UDim2.fromOffset(44, 22)
+            value.BackgroundTransparency = 1
+            value.Text = money(info.Value)
+            value.TextColor3 = THEME.AccentSoft
+            value.Font = Enum.Font.GothamMedium
+            value.TextSize = 12
+            value.TextXAlignment = Enum.TextXAlignment.Left
+            value.Parent = frame
+
+            rows[info.Uid] = { Frame = frame, Stroke = fStroke }
+
+            frame.MouseButton1Click:Connect(function()
+                setSelected(info.Uid)
+                status.Text = "選択中: " .. info.Name
+            end)
+        end
+
+        setSelected(still and selectedUid or nil)
+    end
+
+    return gui, main, header, status, rebuild, function() return selectedUid end
+			end------------------------------------------------------------------ UI ボタン・起動
+local gui, main, header, statusLabel, rebuildList, getSelectedUid = makeUI()
+local W, H = 360, 460
+
+-- ボタン生成ヘルパー
+local function makeButton(text, pos, size, color, parent)
+    local btn = Instance.new("TextButton")
+    btn.Size = size
+    btn.Position = pos
+    btn.BackgroundColor3 = color
+    btn.BorderSizePixel = 0
+    btn.Text = text
+    btn.TextColor3 = THEME.Text
+    btn.Font = Enum.Font.GothamBold
+    btn.TextSize = 14
+    btn.AutoButtonColor = true
+    btn.ZIndex = 6
+    btn.Parent = parent
+
+    local bCorner = Instance.new("UICorner")
+    bCorner.CornerRadius = UDim.new(0, 10)
+    bCorner.Parent = btn
+
+    local bStroke = Instance.new("UIStroke")
+    bStroke.Color = THEME.AccentDark
+    bStroke.Thickness = 1
+    bStroke.Transparency = 0.4
+    bStroke.Parent = btn
+
+    return btn, bStroke
+end
+
+local refreshBtn = makeButton("更新",
+    UDim2.new(0, 10, 1, -70),
+    UDim2.new(0.32, -12, 0, 44),
+    THEME.Card, main)
+
+local autoBtn = makeButton("自動盗み",
+    UDim2.new(0.32, 0, 1, -70),
+    UDim2.new(0.36, -6, 0, 44),
+    Color3.fromRGB(30, 80, 60), main)
+
+local instantBtn = makeButton("即盗み",
+    UDim2.new(0.68, 6, 1, -70),
+    UDim2.new(0.32, -16, 0, 44),
+    Color3.fromRGB(30, 70, 100), main)
+
+refreshBtn.MouseButton1Click:Connect(function()
+    if not state.Busy then
+        rebuildList()
+        statusLabel.Text = "更新完了"
+    end
 end)
 
-stealButton.MouseButton1Click:Connect(function()
-    if state.Busy then
-        state.Cancel = true
-        status("キャンセル中")
-        return
+autoBtn.MouseButton1Click:Connect(function()
+    if autoEnabled then
+        stopAutoSteal()
+        autoBtn.Text = "自動盗み"
+        autoBtn.BackgroundColor3 = Color3.fromRGB(30, 80, 60)
+        statusLabel.Text = "自動盗み停止"
+    else
+        startAutoSteal()
+        autoBtn.Text = "停止"
+        autoBtn.BackgroundColor3 = Color3.fromRGB(120, 40, 40)
+        statusLabel.Text = "自動盗み開始"
     end
-    if not selectedUid then
-        status("ペットを選択")
-        return
-    end
-    stealAndDeliver(selectedUid)
 end)
 
-task.spawn(function()
-    while gui.Parent do
-        task.wait(0.25)
-        stealButton.Text = state.Busy and "キャンセル" or "盗む"
+instantBtn.MouseButton1Click:Connect(function()
+    local uid = getSelectedUid()
+    if uid then
+        state.Busy = false
+        stealAndDeliver(uid)
+        statusLabel.Text = "即盗み実行中..."
+    else
+        statusLabel.Text = "卵を選択してください"
     end
 end)
 
 -- ドラッグ
-do
-    local dragging, startPos, startInput
-    header.InputBegan:Connect(function(input)
-        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-            dragging, startPos, startInput = true, window.Position, input.Position
-            input.Changed:Connect(function()
-                if input.UserInputState == Enum.UserInputState.End then dragging = false end
-            end)
-        end
-    end)
-    UserInputService.InputChanged:Connect(function(input)
-        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-            local delta = input.Position - startInput
-            window.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-        end
-    end)
-end
-
--- 開閉アニメーション
-local minimized = false
-local TWEEN_INFO = TweenInfo.new(0.25, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
-minimize.MouseButton1Click:Connect(function()
-    minimized = not minimized
-    if minimized then
-        TweenService:Create(window, TWEEN_INFO, { Size = UDim2.fromOffset(W, HEADER) }):Play()
-        task.delay(0.1, function() body.Visible = false end)
-    else
-        body.Visible = true
-        TweenService:Create(window, TWEEN_INFO, { Size = UDim2.fromOffset(W, H) }):Play()
+local dragging, dragStart, startPos
+header.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = main.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
     end
 end)
 
-close.MouseButton1Click:Connect(function()
-    state.Cancel = true
-    fpsOff()
-    shieldStop()
-    shineConnection:Disconnect()
-    gui:Destroy()
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+        or input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - dragStart
+        main.Position = UDim2.new(
+            startPos.X.Scale, startPos.X.Offset + delta.X,
+            startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
 end)
 
--- 初期構築
-rebuild()
+-- 自動更新
 task.spawn(function()
     while gui.Parent do
-        task.wait(4)
-        if not state.Busy and body.Visible then rebuild() end
+        task.wait(5)
+        if not state.Busy and not autoEnabled then
+            pcall(rebuildList)
+        end
     end
 end)
 
--- 起動
-shieldStart()
-		
+-- ボタン状態監視
+task.spawn(function()
+    while gui.Parent do
+        task.wait(0.3)
+        if state.Busy then
+            instantBtn.Text = "実行中..."
+            instantBtn.BackgroundColor3 = Color3.fromRGB(60, 50, 30)
+        else
+            instantBtn.Text = "即盗み"
+            instantBtn.BackgroundColor3 = Color3.fromRGB(30, 70, 100)
+        end
+    end
+end)------------------------------------------------------------------ 起動
+print("[Shouyu Steal Hub] 起動完了")
+print("  速度: " .. CFG.Speed)
+print("  テーマ: 水色")
+print("  Auto Steal / Instant Steal 有効")
+				
