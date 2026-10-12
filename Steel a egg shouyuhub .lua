@@ -630,12 +630,11 @@ local function stealAndDeliver(uid)
             -- PART 4 の stealAndDeliver 内
 
             -- 掴む
-            if not grab(uid, CFG.GrabTimeout) then return end
+    if not grab(uid, CFG.GrabTimeout) then return end
 
-            -- ★ flyHome → walkHome に変更
-            walkHome()
-            -- 家へ飛ぶ（同じ速度1350）
-            flyHome(lineInfo())
+    -- 家へ歩いて帰る
+    walkHome()
+end)
         end)
 
         if not ok then warn("[Steal] " .. tostring(err)) end
@@ -680,7 +679,6 @@ local function stopAutoSteal()
     autoThread = nil
 		end-- ============================================================
 -- SHOUYUHUB - PART 5/6
--- UI前半（GUI・ヘッダー・ボディ・リスト）
 -- ============================================================
 
 print("[ShouyuHub] UI構築開始")
