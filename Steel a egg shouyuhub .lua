@@ -1014,21 +1014,51 @@ end)
 print("[ShouyuHub] 起動完了 / 速度 " .. CFG.Speed)
 print("  GUI Parent: " .. tostring(gui.Parent and gui.Parent:GetFullName() or "nil"))
 			-- ============================================================
--- PART 7/6 - Steel Egg Auto Executor
--- Steel Eggでのみ起動 / リスポーン・テレポート・再参加に自動対応
+-- ============================================================
+-- PART 7/6 - Auto Executor（安全版）
+-- 必ず一番最後に置く
 -- ============================================================
 
-local SCRIPT_URL = "https://raw.githubusercontent.com/shouyu356-alt/shouyuhubfmlya/main/Steel%20a%20egg%20shouyuhub%20.lua"
+-- queue_on_teleport に登録
+do
+    local SCRIPT_URL = "https://raw.githubusercontent.com/shouyu356-alt/shouyuhubfmlya/main/Steel%20a%20egg%20shouyuhub%20.lua"
 
--- Steel Egg の PlaceId（複数対応）
-local STEEL_EGG_PLACE_IDS = {}
+    local genv = (type(getgenv) == "function" and getgenv()) or _G
+    local q = rawget(genv, "queue_on_teleport")
+        or rawget(_G, "queue_on_teleport")
+        or (type(syn) == "table" and syn.queue_on_teleport)
 
--- Steel Egg の名前パターン
-local STEEL_EGG_NAME_PATTERNS = {
-    "steal an egg",
-    "steal a egg",
-    "stealegg",
-    "steel an egg",
-    "steel a egg",
-    "steel egg",
-			}
+    if type(q) == "function" and not rawget(_G, "__ShouyuHubQueued") then
+        local code = string.format([[
+task.wait(3)
+local ok, src = pcall(function() return game:HttpGet("%s") end)
+if ok and type(src) == "string" then
+    local fn = loadstring(src)
+    if fn then pcall(fn) end
+end
+]], SCRIPT_URL)
+        local ok = pcall(q, code)
+        if ok then
+            rawset(_G, "__ShouyuHubQueued", true)
+            print("[ShouyuHub] Auto Executor 登録完了")
+        end
+    end
+end
+
+-- リスポーン時のリセット
+do
+    local conn = localPlayer.CharacterAdded:Connect(function()
+        task.wait(1)
+        pcall(function()
+            state.Busy = false
+            state.Cancel = false
+            state.Uid = nil
+            flyCancel = false
+        end)
+        pcall(rebuild)
+    end)
+    -- 切断時に接続解除（念のため）
+    gui.Destroying:Connect(function()
+        pcall(function() conn:Disconnect() end)
+    end)
+			end
