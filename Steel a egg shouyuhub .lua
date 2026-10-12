@@ -199,70 +199,120 @@ local function money(v)
     return string.format("$%d/s", math.floor(v + 0.5))
 end-- ===========================
 	-- ============================================================
--- SHOUYUHUB - PART 3/6 (完全版)
--- フライ移動（速度1350・両方適用）・掴む
+-- ============================================================
+-- SHOUYUHUB - PART 3/6 (完全版・その1)
+-- フライ移動 + NetworkOwner常時監視
 -- ============================================================
 
 local flyCancel = false
+local flyState = {
+    Active = false,
+    OwnerConn = nil,
+    LastOwnerCheck = 0,
+    LastOwnerSet = 0,
+    FailCount = 0,
+}
 
 -- ============================================================
--- flyTo 完全版
--- PreSimulation + Heartbeat 二段構え
--- NetworkOwner取得 + スタック検知 + ジッター
+-- NetworkOwner を常時監視するコネクション
+-- ゲーム開始から常に動かす（フライ中だけでなく）
 -- ============================================================
-local function flyTo(target, cancelCheck)
-    local char = localPlayer.Character
-    local myRoot = root()
-    if not char or not myRoot then return false end
+local function ensureNetworkOwner()
+    local r = root()
+    if not r then return false end
+    local ok = pcall(function()
+        r:SetNetworkOwner(localPlayer)
+    end)
+    if ok then
+        flyState.LastOwnerSet = os.clock()
+    end
+    return ok
+end
 
-    local hum = char:FindFirstChildOfClass("Humanoid")
-    if hum then
+-- 常時監視コネクションを開始
+if flyState.OwnerConn then
+    pcall(function() flyState.OwnerConn:Disconnect() end)
+end
+flyState.OwnerConn = RunService.Heartbeat:Connect(function(dt)
+    flyState.LastOwnerCheck = flyState.LastOwnerCheck + dt
+    if flyState.LastOwnerCheck < 0.25 then return end
+    flyState.LastOwnerCheck = 0
+
+    local r = root()
+    if not r then return end
+
+    -- NetworkOwner を確認して、必要なら取得
+    pcall(function()
+        local currentOwner = r:GetNetworkOwner()
+        if currentOwner ~= localPlayer then
+            r:SetNetworkOwner(localPlayer)
+            flyState.LastOwnerSet = os.clock()
+        end
+    end)
+end)
+
+-- キャラ再スポーン時にも即座に取得
+localPlayer.CharacterAdded:Connect(function(char)
+    task.wait(0.5)
+    local r = char:FindFirstChild("HumanoidRootPart")
+    if r then
         pcall(function()
-            hum.PlatformStand = true
+            r:SetNetworkOwner(localPlayer)
         end)
     end
+end)-- ============================================================
+-- flyTo - 超堅牢版
+-- - PreSimulation + Heartbeat 二段書き換え
+-- - スタック検知・自動リカバリ
+-- - 到着判定の精度向上
+-- - タイムアウト処理
+-- ============================================================
+local function flyTo(target, cancelCheck)
+    if type(target) ~= "Vector3" then return false end
 
-    -- NetworkOwner を自分に
+    -- キャラ確認
+    local char = localPlayer.Character
+    if not char then return false end
+
+    local myRoot = root()
+    if not myRoot then return false end
+
+    local hum = char:FindFirstChildOfClass("Humanoid")
+    if not hum or hum.Health <= 0 then return false end
+
+    -- PlatformStand ON（物理干渉を止める）
     pcall(function()
-        myRoot:SetNetworkOwner(localPlayer)
+        hum.PlatformStand = true
     end)
+
+    -- NetworkOwner 即取得
+    ensureNetworkOwner()
+
+    flyState.Active = true
+    flyState.FailCount = 0
 
     local started = os.clock()
     local result = false
     local lastPos = myRoot.Position
     local lastCheck = os.clock()
     local stuck = 0
-    local preConn = nil
-    local beatConn = nil
-    local reached = false
-    local networkRefresh = 0
+    local stepCount = 0
 
-    -- PreSimulation で物理前にCFrame書き換え
+    -- PreSimulation での書き換え接続
+    local preConn = nil
     preConn = RunService.PreSimulation:Connect(function(dt)
-        if reached then return end
+        if not flyState.Active then return end
         if flyCancel then return end
         if type(cancelCheck) == "function" and cancelCheck() then return end
 
         local r = root()
         if not r or not r.Parent then return end
 
-        -- NetworkOwner 定期再取得
-        networkRefresh = networkRefresh + dt
-        if networkRefresh > 0.5 then
-            networkRefresh = 0
-            pcall(function()
-                r:SetNetworkOwner(localPlayer)
-            end)
-        end
-
         local delta = target - r.Position
         local dist = delta.Magnitude
-        if dist <= 2 then
-            reached = true
-            result = true
-            return
-        end
+        if dist <= 2 then return end
 
+        -- dt正規化
         if type(dt) ~= "number" or dt ~= dt then dt = 1/60 end
         if dt > 0.1 then dt = 0.1 end
         if dt < 1/240 then dt = 1/240 end
@@ -270,8 +320,9 @@ local function flyTo(target, cancelCheck)
         local dir = dist > 0.01 and delta.Unit or Vector3.zero
         local step = math.min(CFG.Speed * dt, dist)
 
-        if step > 1 then
-            step = step * (1 + rndJ(0.03))
+        -- ジッター
+        if step > 2 then
+            step = step * (1 + rndJ(0.02))
         end
 
         local nextPos = r.Position + dir * step
@@ -283,22 +334,38 @@ local function flyTo(target, cancelCheck)
         end)
     end)
 
-    -- Heartbeat 側でも強制（物理後の巻き戻し対策）
-    beatConn = RunService.Heartbeat:Connect(function(dt)
-        if reached then return end
-        if flyCancel then return end
-        if type(cancelCheck) == "function" and cancelCheck() then return end
+    -- Heartbeat メインループ
+    while os.clock() - started < CFG.FlyTimeout do
+        if flyCancel then break end
+        if type(cancelCheck) == "function" and cancelCheck() then break end
 
         local r = root()
-        if not r or not r.Parent then return end
+        if not r or not r.Parent then break end
 
+        -- 到着判定
         local delta = target - r.Position
         local dist = delta.Magnitude
         if dist <= 2 then
-            reached = true
             result = true
-            return
+            break
         end
+
+        -- 毎フレーム強制（物理後の巻き戻し対策）
+        local dt = RunService.Heartbeat:Wait()
+        if type(dt) ~= "number" or dt ~= dt then dt = 1/60 end
+        if dt > 0.1 then dt = 0.1 end
+        if dt < 1/240 then dt = 1/240 end
+
+        local dir = dist > 0.01 and delta.Unit or Vector3.zero
+        local step = math.min(CFG.Speed * dt, dist)
+
+        pcall(function()
+            r.CFrame = CFrame.new(r.Position + dir * step) * r.CFrame.Rotation
+            r.AssemblyLinearVelocity = Vector3.zero
+            r.AssemblyAngularVelocity = Vector3.zero
+        end)
+
+        stepCount = stepCount + 1
 
         -- スタック判定
         local now = os.clock()
@@ -312,73 +379,82 @@ local function flyTo(target, cancelCheck)
             lastCheck = now
         end
 
-        -- スタック時はHeartbeat側で直接書き換え
+        -- スタック時は NetworkOwner を取り直す
         if stuck >= 2 then
-            if type(dt) ~= "number" or dt ~= dt then dt = 1/60 end
-            if dt > 0.1 then dt = 0.1 end
-            if dt < 1/240 then dt = 1/240 end
-
-            local dir = dist > 0.01 and delta.Unit or Vector3.zero
-            local step = math.min(CFG.Speed * dt, dist)
-            local nextPos = r.Position + dir * step
-
-            pcall(function()
-                r.CFrame = CFrame.new(nextPos) * r.CFrame.Rotation
-                r.AssemblyLinearVelocity = Vector3.zero
-                r.AssemblyAngularVelocity = Vector3.zero
-            end)
+            ensureNetworkOwner()
         end
 
+        -- スタック限界
         if stuck > 8 then
-            reached = true
-            return
-        end
-
-        if os.clock() - started > CFG.FlyTimeout then
-            reached = true
-            return
-        end
-    end)
-
-    -- 到着 or タイムアウトまで待つ
-    while not reached do
-        if flyCancel then break end
-        if type(cancelCheck) == "function" and cancelCheck() then break end
-
-        local r = root()
-        if not r or not r.Parent then break end
-
-        local dist = (target - r.Position).Magnitude
-        if dist <= 2 then
-            result = true
+            flyState.FailCount = flyState.FailCount + 1
             break
         end
 
-        if os.clock() - started > CFG.FlyTimeout then break end
-
-        RunService.Heartbeat:Wait()
+        -- 安全弁（ループ上限）
+        if stepCount > 3000 then break end
     end
 
     -- クリーンアップ
-    if preConn then preConn:Disconnect() end
-    if beatConn then beatConn:Disconnect() end
+    if preConn then
+        pcall(function() preConn:Disconnect() end)
+    end
 
+    flyState.Active = false
+
+    -- PlatformStand OFF
     if hum then
         pcall(function()
             hum.PlatformStand = false
         end)
     end
 
+    -- 停止
+    local finalRoot = root()
+    if finalRoot then
+        pcall(function()
+            finalRoot.AssemblyLinearVelocity = Vector3.zero
+            finalRoot.AssemblyAngularVelocity = Vector3.zero
+        end)
+    end
+
     return result
+	end-- ============================================================
+-- flyToRetry - 失敗時に自動リトライ
+-- ============================================================
+local function flyToRetry(target, cancelCheck, maxRetry)
+    maxRetry = maxRetry or 3
+
+    for i = 1, maxRetry do
+        if flyCancel then return false end
+        if type(cancelCheck) == "function" and cancelCheck() then return false end
+
+        -- 各リトライ前に NetworkOwner を確実に取得
+        ensureNetworkOwner()
+        task.wait(0.05)
+
+        local ok = flyTo(target, cancelCheck)
+        if ok then return true end
+
+        -- 失敗したら少し待ってからリトライ
+        task.wait(0.1)
+    end
+
+    return false
 end
 
 -- ============================================================
--- grab: 卵を掴む
+-- grab - 卵を掴む（強化版）
+-- - プロンプト検出精度向上
+-- - リトライ付き
+-- - 失敗時のリカバリ
 -- ============================================================
 local function grab(uid, timeout)
     timeout = timeout or CFG.GrabTimeout
     local cache = { At = 0 }
-    local waited, since = 0, 1
+    local waited = 0
+    local since = 1
+    local promptAttempts = 0
+    local lastPromptPos = nil
 
     while not state.Carrying and waited < timeout and not state.Cancel do
         local r = root()
@@ -389,22 +465,50 @@ local function grab(uid, timeout)
 
         if r and egg then
             local delta = egg - r.Position
-            if delta.Magnitude > 2 then
+            local dist = delta.Magnitude
+
+            -- 卵に近づく
+            if dist > 2 then
                 local pace = 200
                 local v = delta / math.max(0.08, dt)
-                if v.Magnitude > pace then v = v.Unit * pace end
+                if v.Magnitude > pace then
+                    v = v.Unit * pace
+                end
+
                 pcall(function()
                     r.AssemblyLinearVelocity = v + Vector3.new(0, workspace.Gravity * dt * 0.5, 0)
                     r.AssemblyAngularVelocity = Vector3.zero
                 end)
             end
+
+            -- プロンプト発火
             if since >= CFG.GrabInterval then
                 since = 0
+
+                -- プロンプト検出（複数回試行）
                 local pr = promptNear(egg - Vector3.new(0, 3, 0), CFG.PromptRadius)
-                if pr and typeof(fireproximityprompt) == "function" then
-                    pcall(function() pr.HoldDuration = 0 end)
-                    pcall(fireproximityprompt, pr)
+
+                if pr then
+                    promptAttempts = promptAttempts + 1
+                    lastPromptPos = pr
+
+                    pcall(function()
+                        pr.HoldDuration = 0
+                    end)
+
+                    if typeof(fireproximityprompt) == "function" then
+                        pcall(fireproximityprompt, pr)
+                    else
+                        -- フォールバック：InputHoldBegin
+                        pcall(function()
+                            pr:InputHoldBegin()
+                            task.wait(0.05)
+                            pr:InputHoldEnd()
+                        end)
+                    end
                 end
+
+                -- CarryFieldEgg も並行して呼ぶ
                 task.spawn(takeEgg, uid)
             end
         elseif since >= CFG.GrabInterval then
@@ -413,14 +517,68 @@ local function grab(uid, timeout)
         end
     end
 
+    -- 停止
     local r = root()
     if r then
         pcall(function()
             r.AssemblyLinearVelocity = Vector3.zero
         end)
     end
+
     return state.Carrying and state.Uid == uid
-	end
+end
+
+-- ============================================================
+-- walkHome - 歩行速度で納品（Chilli Hub方式）
+-- ============================================================
+local function walkHome()
+    local started = os.clock()
+    local home = homePoint()
+
+    local hum = localPlayer.Character
+        and localPlayer.Character:FindFirstChildOfClass("Humanoid")
+    local walkSpd = hum and hum.WalkSpeed or 16
+
+    while os.clock() - started < 25 do
+        if state.Cancel then break end
+        if state.Delivered >= started then return true end
+        if not state.Carrying then break end
+
+        local r = root()
+        if not r then break end
+
+        local dist = (home - r.Position).Magnitude
+        if dist < 4 then
+            task.wait(0.15)
+            dropEgg()
+            local w = 0
+            while state.Delivered < started and w < 1.5 do
+                w = w + RunService.Heartbeat:Wait()
+            end
+            return state.Delivered >= started
+        end
+
+        local delta = home - r.Position
+        local dir = delta.Unit
+        local spd = walkSpd * 1.15
+        if dist < 20 then
+            spd = spd * dist / 20
+        end
+
+        pcall(function()
+            r.AssemblyLinearVelocity = Vector3.new(
+                dir.X * spd,
+                r.AssemblyLinearVelocity.Y,
+                dir.Z * spd
+            )
+            r.AssemblyAngularVelocity = Vector3.zero
+        end)
+
+        RunService.Heartbeat:Wait()
+    end
+
+    return state.Delivered >= started
+		end
 	
 -- SHOUYUHUB - PART 4/6
 -- 納品・メイン盗み・オートループ
