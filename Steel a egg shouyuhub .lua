@@ -1,7 +1,6 @@
-
 -- ============================================================
--- SHOUYUHUB - Blood Moon Edition - PART 1/6
--- 設定・テーマ・ゲームハンドル
+-- SHOUYUHUB - Speed 6500 Edition
+-- Auto Steal / Instant Steal / Fly 6500 / Blood Moon UI
 -- ============================================================
 
 local Players = game:GetService("Players")
@@ -13,13 +12,13 @@ local TweenService = game:GetService("TweenService")
 local localPlayer = Players.LocalPlayer
 
 local CFG = {
-    Speed = 1350,
+    Speed = 6500,
     GrabInterval = 0.03,
     GrabTimeout = 4,
     PromptRadius = 12,
-    StealRadius = 61,
+    StealRadius = 100,
     DropDelay = 0.15,
-    FlyTimeout = 20,
+    FlyTimeout = 12,
     AutoRefreshInterval = 4,
 }
 
@@ -59,7 +58,10 @@ local function root()
     return c and c:FindFirstChild("HumanoidRootPart")
 end
 
-local state = { Carrying = false, Uid = nil, Delivered = 0, Busy = false, Cancel = false }
+local state = {
+    Carrying = false, Uid = nil, Delivered = 0,
+    Busy = false, Cancel = false, FlyCancel = false,
+}
 
 if type(EggState) == "table" and type(EggState.CarryChanged) == "table" then
     EggState.CarryChanged:Connect(function(arg)
@@ -73,9 +75,11 @@ end
 pcall(function()
     local ev = rem("RE/EggWorld/FieldEggRedeemVerdict")
     if ev then ev.OnClientEvent:Connect(function() state.Delivered = os.clock() end) end
-end)-- ============================================================
+end)
+
+print("[ShouyuHub] PART 1 OK")-- ============================================================
 -- SHOUYUHUB - PART 2/6
--- 卵情報・座標系
+-- 卵情報
 -- ============================================================
 
 local function takeEgg(uid)
@@ -123,7 +127,7 @@ local function eggNow(uid, cache)
         local ok, p = pcall(function() return node:GetPivot().Position end)
         if ok and p then cache.Pos, cache.At = p, os.clock(); return p end
     end
-    if os.clock() - cache.At >= 0.5 then
+    if os.clock() - (cache.At or 0) >= 0.4 then
         cache.At = os.clock()
         cache.Pos = eggPos(uid) or cache.Pos
     end
@@ -142,14 +146,6 @@ local function promptNear(pos, radius)
         end
     end
     return best
-end
-
-local function lineInfo()
-    local w = workspace:FindFirstChild("World") or workspace:FindFirstChild("__OBJECTS")
-    w = w and w:FindFirstChild("Areas")
-    w = w and w:FindFirstChild("SeparationLine")
-    local ok = w and w:IsA("BasePart")
-    return ok and w.Position.X or 552.2, ok and w.Position.Y or 67.67
 end
 
 local function homePoint()
@@ -198,112 +194,51 @@ local function money(v)
         if v >= x[1] then return string.format("$%.2f%s/s", v / x[1], x[2]) end
     end
     return string.format("$%d/s", math.floor(v + 0.5))
-end-- ===========================
-	-- ============================================================
--- ============================================================
--- SHOUYUHUB - PART 3/6 (完全版・その1)
--- フライ移動 + NetworkOwner常時監視
--- ============================================================
-
-local flyCancel = false
-local flyState = {
-    Active = false,
-    OwnerConn = nil,
-    LastOwnerCheck = 0,
-    LastOwnerSet = 0,
-    FailCount = 0,
-}
-
--- ============================================================
--- NetworkOwner を常時監視するコネクション
--- ゲーム開始から常に動かす（フライ中だけでなく）
--- ============================================================
-local function ensureNetworkOwner()
-    local r = root()
-    if not r then return false end
-    local ok = pcall(function()
-        r:SetNetworkOwner(localPlayer)
-    end)
-    if ok then
-        flyState.LastOwnerSet = os.clock()
-    end
-    return ok
 end
 
--- 常時監視コネクションを開始
-if flyState.OwnerConn then
-    pcall(function() flyState.OwnerConn:Disconnect() end)
-end
-flyState.OwnerConn = RunService.Heartbeat:Connect(function(dt)
-    flyState.LastOwnerCheck = flyState.LastOwnerCheck + dt
-    if flyState.LastOwnerCheck < 0.25 then return end
-    flyState.LastOwnerCheck = 0
+print("[ShouyuHub] PART 2 OK")-- ============================================================
+-- SHOUYUHUB - PART 3/6
+-- フライ（6500）・掴む・納品
+-- ============================================================
 
+-- NetworkOwner 常時監視
+if _G.__ShouyuOwnerConn then
+    pcall(function() _G.__ShouyuOwnerConn:Disconnect() end)
+end
+_G.__ShouyuOwnerConn = RunService.Heartbeat:Connect(function()
     local r = root()
     if not r then return end
-
-    -- NetworkOwner を確認して、必要なら取得
     pcall(function()
-        local currentOwner = r:GetNetworkOwner()
-        if currentOwner ~= localPlayer then
+        if r:GetNetworkOwner() ~= localPlayer then
             r:SetNetworkOwner(localPlayer)
-            flyState.LastOwnerSet = os.clock()
         end
     end)
 end)
 
--- キャラ再スポーン時にも即座に取得
-localPlayer.CharacterAdded:Connect(function(char)
-    task.wait(0.5)
-    local r = char:FindFirstChild("HumanoidRootPart")
-    if r then
-        pcall(function()
-            r:SetNetworkOwner(localPlayer)
-        end)
-    end
-end)-- ============================================================
--- flyTo - 超堅牢版
--- - PreSimulation + Heartbeat 二段書き換え
--- - スタック検知・自動リカバリ
--- - 到着判定の精度向上
--- - タイムアウト処理
+-- ============================================================
+-- flyTo - PreSimulation + Heartbeat 二段書き換え（6500）
 -- ============================================================
 local function flyTo(target, cancelCheck)
-    if type(target) ~= "Vector3" then return false end
-
-    -- キャラ確認
     local char = localPlayer.Character
-    if not char then return false end
-
     local myRoot = root()
-    if not myRoot then return false end
+    if not char or not myRoot then return false end
 
     local hum = char:FindFirstChildOfClass("Humanoid")
-    if not hum or hum.Health <= 0 then return false end
+    if hum then pcall(function() hum.PlatformStand = true end) end
 
-    -- PlatformStand ON（物理干渉を止める）
-    pcall(function()
-        hum.PlatformStand = true
-    end)
-
-    -- NetworkOwner 即取得
-    ensureNetworkOwner()
-
-    flyState.Active = true
-    flyState.FailCount = 0
+    pcall(function() myRoot:SetNetworkOwner(localPlayer) end)
 
     local started = os.clock()
     local result = false
     local lastPos = myRoot.Position
     local lastCheck = os.clock()
     local stuck = 0
-    local stepCount = 0
-
-    -- PreSimulation での書き換え接続
     local preConn = nil
+    local reached = false
+
+    -- PreSimulation
     preConn = RunService.PreSimulation:Connect(function(dt)
-        if not flyState.Active then return end
-        if flyCancel then return end
+        if reached or state.FlyCancel then return end
         if type(cancelCheck) == "function" and cancelCheck() then return end
 
         local r = root()
@@ -311,9 +246,8 @@ local function flyTo(target, cancelCheck)
 
         local delta = target - r.Position
         local dist = delta.Magnitude
-        if dist <= 2 then return end
+        if dist <= 2 then reached = true; return end
 
-        -- dt正規化
         if type(dt) ~= "number" or dt ~= dt then dt = 1/60 end
         if dt > 0.1 then dt = 0.1 end
         if dt < 1/240 then dt = 1/240 end
@@ -321,37 +255,26 @@ local function flyTo(target, cancelCheck)
         local dir = dist > 0.01 and delta.Unit or Vector3.zero
         local step = math.min(CFG.Speed * dt, dist)
 
-        -- ジッター
-        if step > 2 then
-            step = step * (1 + rndJ(0.02))
-        end
-
-        local nextPos = r.Position + dir * step
-
         pcall(function()
-            r.CFrame = CFrame.new(nextPos) * r.CFrame.Rotation
+            r.CFrame = CFrame.new(r.Position + dir * step) * r.CFrame.Rotation
             r.AssemblyLinearVelocity = Vector3.zero
             r.AssemblyAngularVelocity = Vector3.zero
         end)
     end)
 
-    -- Heartbeat メインループ
+    -- Heartbeat メイン
     while os.clock() - started < CFG.FlyTimeout do
-        if flyCancel then break end
+        if reached then break end
+        if state.FlyCancel then break end
         if type(cancelCheck) == "function" and cancelCheck() then break end
 
         local r = root()
         if not r or not r.Parent then break end
 
-        -- 到着判定
         local delta = target - r.Position
         local dist = delta.Magnitude
-        if dist <= 2 then
-            result = true
-            break
-        end
+        if dist <= 2 then result = true; break end
 
-        -- 毎フレーム強制（物理後の巻き戻し対策）
         local dt = RunService.Heartbeat:Wait()
         if type(dt) ~= "number" or dt ~= dt then dt = 1/60 end
         if dt > 0.1 then dt = 0.1 end
@@ -366,11 +289,8 @@ local function flyTo(target, cancelCheck)
             r.AssemblyAngularVelocity = Vector3.zero
         end)
 
-        stepCount = stepCount + 1
-
-        -- スタック判定
         local now = os.clock()
-        if now - lastCheck > 0.4 then
+        if now - lastCheck > 0.5 then
             if (r.Position - lastPos).Magnitude < 5 then
                 stuck = stuck + 1
             else
@@ -379,83 +299,22 @@ local function flyTo(target, cancelCheck)
             lastPos = r.Position
             lastCheck = now
         end
-
-        -- スタック時は NetworkOwner を取り直す
-        if stuck >= 2 then
-            ensureNetworkOwner()
-        end
-
-        -- スタック限界
-        if stuck > 8 then
-            flyState.FailCount = flyState.FailCount + 1
-            break
-        end
-
-        -- 安全弁（ループ上限）
-        if stepCount > 3000 then break end
+        if stuck > 5 then break end
     end
 
-    -- クリーンアップ
-    if preConn then
-        pcall(function() preConn:Disconnect() end)
-    end
-
-    flyState.Active = false
-
-    -- PlatformStand OFF
-    if hum then
-        pcall(function()
-            hum.PlatformStand = false
-        end)
-    end
-
-    -- 停止
-    local finalRoot = root()
-    if finalRoot then
-        pcall(function()
-            finalRoot.AssemblyLinearVelocity = Vector3.zero
-            finalRoot.AssemblyAngularVelocity = Vector3.zero
-        end)
-    end
+    if preConn then pcall(function() preConn:Disconnect() end) end
+    if hum then pcall(function() hum.PlatformStand = false end) end
 
     return result
-	end-- ============================================================
--- flyToRetry - 失敗時に自動リトライ
--- ============================================================
-local function flyToRetry(target, cancelCheck, maxRetry)
-    maxRetry = maxRetry or 3
-
-    for i = 1, maxRetry do
-        if flyCancel then return false end
-        if type(cancelCheck) == "function" and cancelCheck() then return false end
-
-        -- 各リトライ前に NetworkOwner を確実に取得
-        ensureNetworkOwner()
-        task.wait(0.05)
-
-        local ok = flyTo(target, cancelCheck)
-        if ok then return true end
-
-        -- 失敗したら少し待ってからリトライ
-        task.wait(0.1)
-    end
-
-    return false
 end
 
 -- ============================================================
--- grab - 卵を掴む（強化版）
--- - プロンプト検出精度向上
--- - リトライ付き
--- - 失敗時のリカバリ
+-- grab - 卵を掴む
 -- ============================================================
 local function grab(uid, timeout)
     timeout = timeout or CFG.GrabTimeout
     local cache = { At = 0 }
-    local waited = 0
-    local since = 1
-    local promptAttempts = 0
-    local lastPromptPos = nil
+    local waited, since = 0, 1
 
     while not state.Carrying and waited < timeout and not state.Cancel do
         local r = root()
@@ -466,71 +325,32 @@ local function grab(uid, timeout)
 
         if r and egg then
             local delta = egg - r.Position
-            local dist = delta.Magnitude
-
-            -- 卵に近づく
-            if dist > 2 then
-                local pace = 200
+            if delta.Magnitude > 2 then
                 local v = delta / math.max(0.08, dt)
-                if v.Magnitude > pace then
-                    v = v.Unit * pace
-                end
-
+                if v.Magnitude > 300 then v = v.Unit * 300 end
                 pcall(function()
-                    r.AssemblyLinearVelocity = v + Vector3.new(0, workspace.Gravity * dt * 0.5, 0)
+                    r.AssemblyLinearVelocity = v
                     r.AssemblyAngularVelocity = Vector3.zero
                 end)
             end
-
-            -- プロンプト発火
             if since >= CFG.GrabInterval then
                 since = 0
-
-                -- プロンプト検出（複数回試行）
                 local pr = promptNear(egg - Vector3.new(0, 3, 0), CFG.PromptRadius)
-
-                if pr then
-                    promptAttempts = promptAttempts + 1
-                    lastPromptPos = pr
-
-                    pcall(function()
-                        pr.HoldDuration = 0
-                    end)
-
-                    if typeof(fireproximityprompt) == "function" then
-                        pcall(fireproximityprompt, pr)
-                    else
-                        -- フォールバック：InputHoldBegin
-                        pcall(function()
-                            pr:InputHoldBegin()
-                            task.wait(0.05)
-                            pr:InputHoldEnd()
-                        end)
-                    end
+                if pr and typeof(fireproximityprompt) == "function" then
+                    pcall(function() pr.HoldDuration = 0 end)
+                    pcall(fireproximityprompt, pr)
                 end
-
-                -- CarryFieldEgg も並行して呼ぶ
                 task.spawn(takeEgg, uid)
             end
-        elseif since >= CFG.GrabInterval then
-            since = 0
-            task.spawn(takeEgg, uid)
         end
     end
-
-    -- 停止
     local r = root()
-    if r then
-        pcall(function()
-            r.AssemblyLinearVelocity = Vector3.zero
-        end)
-    end
-
+    if r then pcall(function() r.AssemblyLinearVelocity = Vector3.zero end) end
     return state.Carrying and state.Uid == uid
 end
 
 -- ============================================================
--- walkHome - 歩行速度で納品（Chilli Hub方式）
+-- walkHome - 歩行速度で納品（サーバー検知回避）
 -- ============================================================
 local function walkHome()
     local started = os.clock()
@@ -539,6 +359,7 @@ local function walkHome()
     local hum = localPlayer.Character
         and localPlayer.Character:FindFirstChildOfClass("Humanoid")
     local walkSpd = hum and hum.WalkSpeed or 16
+    if walkSpd > 100 then walkSpd = 16 end
 
     while os.clock() - started < 25 do
         if state.Cancel then break end
@@ -562,53 +383,28 @@ local function walkHome()
         local delta = home - r.Position
         local dir = delta.Unit
         local spd = walkSpd * 1.15
-        if dist < 20 then
-            spd = spd * dist / 20
-        end
+        if dist < 20 then spd = spd * dist / 20 end
 
         pcall(function()
             r.AssemblyLinearVelocity = Vector3.new(
-                dir.X * spd,
-                r.AssemblyLinearVelocity.Y,
-                dir.Z * spd
-            )
+                dir.X * spd, r.AssemblyLinearVelocity.Y, dir.Z * spd)
             r.AssemblyAngularVelocity = Vector3.zero
         end)
-
         RunService.Heartbeat:Wait()
-    end
-
-    return state.Delivered >= started
-		end
-	
--- SHOUYUHUB - PART 4/6
--- 納品・メイン盗み・オートループ
--- ============================================================
-
--- ★ 納品も同じ flyTo（速度1350）
-local function flyHome(lineX)
-    local started = os.clock()
-    local home = homePoint()
-    local ok = flyTo(home + Vector3.new(0, 3, 0), function()
-        return state.Delivered >= started or not state.Carrying
-    end)
-    if not ok and not state.Carrying then return state.Delivered >= started end
-    if state.Carrying then
-        task.wait(CFG.DropDelay)
-        dropEgg()
-        local w = 0
-        while state.Delivered < started and w < 1.5 do
-            w = w + RunService.Heartbeat:Wait()
-        end
     end
     return state.Delivered >= started
 end
+
+print("[ShouyuHub] PART 3 OK")-- ============================================================
+-- SHOUYUHUB - PART 4/6
+-- メイン盗み・オートループ
+-- ============================================================
 
 local function stealAndDeliver(uid)
     if state.Busy then return end
     state.Busy = true
     state.Cancel = false
-    flyCancel = false
+    state.FlyCancel = false
 
     task.spawn(function()
         local ok, err = pcall(function()
@@ -621,20 +417,17 @@ local function stealAndDeliver(uid)
                 while state.Carrying and w < 1 do w = w + RunService.Heartbeat:Wait() end
             end
 
-            -- 卵へ飛ぶ（速度1350）
+            -- 卵へ飛ぶ（6500）
             if not flyTo(egg + Vector3.new(0, 3, 0)) then
                 local live = eggNow(uid, { At = 0 })
                 if live then flyTo(live + Vector3.new(0, 3, 0)) end
             end
 
-            -- PART 4 の stealAndDeliver 内
-
             -- 掴む
-    if not grab(uid, CFG.GrabTimeout) then return end
+            if not grab(uid, CFG.GrabTimeout) then return end
 
-    -- 家へ歩いて帰る
-    walkHome()
-end)
+            -- 家へ歩いて帰る
+            walkHome()
         end)
 
         if not ok then warn("[Steal] " .. tostring(err)) end
@@ -675,25 +468,40 @@ end
 local function stopAutoSteal()
     autoEnabled = false
     state.Cancel = true
-    flyCancel = true
+    state.FlyCancel = true
     autoThread = nil
-		end-- ============================================================
+end
+
+print("[ShouyuHub] PART 4 OK")-- ============================================================
 -- SHOUYUHUB - PART 5/6
+-- UI前半（GUI・ヘッダー・リスト）
 -- ============================================================
 
-print("[ShouyuHub] UI構築開始")
+print("[ShouyuHub] PART 5 開始")
 
 local UI = { W = 340, H = 500, Scale = 1, Minimized = false, AutoRefresh = true }
 local UI_W, UI_H, UI_H_MIN = UI.W, UI.H, 68
 
+-- 親GUI（多重フォールバック）
 local function getParent()
     if type(gethui) == "function" then
         local ok, r = pcall(gethui)
-        if ok and typeof(r) == "Instance" then return r end
+        if ok and typeof(r) == "Instance" then
+            print("[ShouyuHub] parent = gethui")
+            return r
+        end
     end
     local ok, cg = pcall(function() return game:GetService("CoreGui") end)
-    if ok and cg then return cg end
-    return localPlayer:FindFirstChildOfClass("PlayerGui")
+    if ok and cg then
+        print("[ShouyuHub] parent = CoreGui")
+        return cg
+    end
+    local pg = localPlayer:FindFirstChildOfClass("PlayerGui")
+    if pg then
+        print("[ShouyuHub] parent = PlayerGui")
+        return pg
+    end
+    return nil
 end
 
 local gui = Instance.new("ScreenGui")
@@ -702,17 +510,28 @@ gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = true
 gui.DisplayOrder = 999999
 gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+gui.Enabled = true
+
 if type(syn) == "table" and type(syn.protect_gui) == "function" then
     pcall(syn.protect_gui, gui)
 end
-gui.Parent = getParent()
+
+local parent = getParent()
+if parent then
+    local ok = pcall(function() gui.Parent = parent end)
+    if not ok or not gui.Parent then
+        local pg = localPlayer:WaitForChild("PlayerGui", 5)
+        if pg then gui.Parent = pg end
+    end
+end
+
+print("[ShouyuHub] gui.Parent =", gui.Parent and gui.Parent:GetFullName() or "nil")
 
 local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1280, 720)
 if IS_MOBILE then
     UI.Scale = math.min(vp.X * 0.92 / UI_W, vp.Y * 0.80 / UI_H, 1)
 end
 
--- メイン
 local main = Instance.new("Frame", gui)
 main.AnchorPoint = Vector2.new(0.5, 0.5)
 main.Size = UDim2.fromOffset(UI_W, UI_H)
@@ -731,7 +550,7 @@ stroke.Color = THEME.Accent
 stroke.Thickness = 1.5
 stroke.Transparency = 0.25
 
--- ★ Blood Moon 背景
+-- 背景グラデ
 local bg = Instance.new("Frame", main)
 bg.Size = UDim2.fromScale(1, 1)
 bg.BackgroundColor3 = THEME.AccentDeep
@@ -777,7 +596,6 @@ mS.Color = THEME.AccentSoft
 mS.Thickness = 2
 mS.Transparency = 0.4
 
--- タイトル
 local title = Instance.new("TextLabel", header)
 title.Size = UDim2.new(1, -140, 0, 22)
 title.Position = UDim2.fromOffset(52, 8)
@@ -796,14 +614,14 @@ local sub = Instance.new("TextLabel", header)
 sub.Size = UDim2.new(1, -140, 0, 14)
 sub.Position = UDim2.fromOffset(52, 30)
 sub.BackgroundTransparency = 1
-sub.Text = "STEAL AN EGG"
+sub.Text = "STEAL AN EGG (6500)"
 sub.TextColor3 = THEME.TextDim
 sub.Font = Enum.Font.GothamBold
 sub.TextSize = 10
 sub.TextXAlignment = Enum.TextXAlignment.Left
 sub.ZIndex = 6
 
--- 最小化ボタン
+-- 最小化
 local minBtn = Instance.new("TextButton", header)
 minBtn.Size = UDim2.fromOffset(32, 32)
 minBtn.Position = UDim2.new(1, -78, 0.5, -16)
@@ -817,7 +635,7 @@ minBtn.AutoButtonColor = true
 minBtn.ZIndex = 6
 Instance.new("UICorner", minBtn).CornerRadius = UDim.new(0, 8)
 
--- 閉じるボタン
+-- 閉じる
 local closeBtn = Instance.new("TextButton", header)
 closeBtn.Size = UDim2.fromOffset(32, 32)
 closeBtn.Position = UDim2.new(1, -42, 0.5, -16)
@@ -838,7 +656,6 @@ body.Position = UDim2.fromOffset(8, 68)
 body.BackgroundTransparency = 1
 body.ZIndex = 5
 
--- ステータス
 local status = Instance.new("TextLabel", body)
 status.Size = UDim2.new(1, -110, 0, 22)
 status.Position = UDim2.fromOffset(6, 0)
@@ -850,7 +667,6 @@ status.TextSize = 12
 status.TextXAlignment = Enum.TextXAlignment.Left
 status.ZIndex = 6
 
--- 卵リスト
 local list = Instance.new("ScrollingFrame", body)
 list.Size = UDim2.new(1, -4, 1, -150)
 list.Position = UDim2.fromOffset(2, 26)
@@ -874,6 +690,11 @@ lPad.PaddingBottom = UDim.new(0, 6)
 lPad.PaddingLeft = UDim.new(0, 6)
 lPad.PaddingRight = UDim.new(0, 8)
 
+print("[ShouyuHub] PART 5 OK")-- ============================================================
+-- SHOUYUHUB - PART 6/6
+-- UI後半・イベント・起動
+-- ============================================================
+
 local RARITY = {
     Color3.fromRGB(200, 180, 180), Color3.fromRGB(110, 210, 110),
     Color3.fromRGB(90, 160, 255), Color3.fromRGB(190, 110, 255),
@@ -890,7 +711,6 @@ local function setSelected(uid)
         local on = rowUid == uid
         row.Stroke.Thickness = on and 2.5 or 1
         row.Stroke.Color = on and THEME.Accent or THEME.Stroke
-        row.Stroke.Transparency = on and 0 or 0.6
         row.Frame.BackgroundColor3 = on and THEME.AccentDeep or THEME.Card
     end
 end
@@ -919,7 +739,6 @@ local function rebuild()
         frame.Text = ""
         frame.LayoutOrder = index
         frame.AutoButtonColor = true
-
         Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 8)
 
         local fS = Instance.new("UIStroke", frame)
@@ -963,12 +782,9 @@ local function rebuild()
         end)
     end
     setSelected(selectedUid)
-			end-- ============================================================
--- SHOUYUHUB - PART 6/6
--- UI後半（ボタン・イベント・起動）
--- ============================================================
+end
 
--- ボタン生成
+-- ボタン
 local function mkBtn(text, pos, size, color)
     local b = Instance.new("TextButton", body)
     b.Size = size
@@ -1086,23 +902,22 @@ closeBtn.MouseButton1Click:Connect(function()
     floatBtn.Visible = true
 end)
 
--- フローティング操作
 local fbMoved = 0
 floatBtn.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1
         or input.UserInputType == Enum.UserInputType.Touch then
         fbMoved = 0
-        local startPos = floatBtn.Position
-        local startIn = input.Position
+        local sp = floatBtn.Position
+        local si = input.Position
         local conn
         conn = UserInputService.InputChanged:Connect(function(i)
             if i.UserInputType == Enum.UserInputType.MouseMovement
                 or i.UserInputType == Enum.UserInputType.Touch then
-                local d = i.Position - startIn
+                local d = i.Position - si
                 fbMoved = math.max(fbMoved, d.Magnitude)
                 floatBtn.Position = UDim2.new(
-                    startPos.X.Scale, startPos.X.Offset + d.X,
-                    startPos.Y.Scale, startPos.Y.Offset + d.Y)
+                    sp.X.Scale, sp.X.Offset + d.X,
+                    sp.Y.Scale, sp.Y.Offset + d.Y)
             end
         end)
         input.Changed:Connect(function()
@@ -1168,11 +983,10 @@ task.spawn(function()
 end)
 
 task.spawn(function()
-    task.wait(0.2)
+    task.wait(0.3)
     pcall(rebuild)
 end)
 
-print("[ShouyuHub] 起動完了 / 速度 " .. CFG.Speed)
+print("[ShouyuHub] ===== 起動完了 =====")
+print("  速度: " .. CFG.Speed)
 print("  GUI Parent: " .. tostring(gui.Parent and gui.Parent:GetFullName() or "nil"))
-			-- ============================================================
--- ============================================================
