@@ -1013,3 +1013,22 @@ end)
 
 print("[ShouyuHub] 起動完了 / 速度 " .. CFG.Speed)
 print("  GUI Parent: " .. tostring(gui.Parent and gui.Parent:GetFullName() or "nil"))
+			-- ============================================================
+-- PART 7/6 - Steel Egg Auto Executor
+-- Steel Eggでのみ起動 / リスポーン・テレポート・再参加に自動対応
+-- ============================================================
+
+local SCRIPT_URL = "https://raw.githubusercontent.com/shouyu356-alt/shouyuhubfmlya/main/Steel%20a%20egg%20shouyuhub%20.lua"
+
+-- Steel Egg の PlaceId（複数対応）
+local STEEL_EGG_PLACE_IDS = {}
+
+-- Steel Egg の名前パターン
+local STEEL_EGG_NAME_PATTERNS = {
+    "steal an egg",
+    "steal a egg",
+    "stealegg",
+    "steel an egg",
+    "steel a egg",
+    "steel egg",
+			}
