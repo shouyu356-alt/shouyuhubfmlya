@@ -1,5 +1,5 @@
 -- ============================================================
--- SHOUYUHUB - Speed 6500 Edition
+-- SHOUYUHUB - Speed 3500 Edition
 -- Auto Steal / Instant Steal / Fly 3500 / Blood Moon UI
 -- ============================================================
 
