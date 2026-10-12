@@ -1,6 +1,6 @@
 -- ============================================================
 -- SHOUYUHUB - Speed 6500 Edition
--- Auto Steal / Instant Steal / Fly 6500 / Blood Moon UI
+-- Auto Steal / Instant Steal / Fly 3500 / Blood Moon UI
 -- ============================================================
 
 local Players = game:GetService("Players")
