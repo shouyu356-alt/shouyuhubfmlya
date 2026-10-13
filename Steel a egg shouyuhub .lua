@@ -1,5 +1,5 @@
 -- ================================================================
--- SHOUYU HUB (Moon) + Auto/Instant Steal 完全版
+-- SHOUYU HUB (Moon) 完全版 v1
 -- Part 1/7 : セットアップ + ヘルパー
 -- ================================================================
 local Players = game:GetService("Players")
@@ -9,17 +9,21 @@ local UserInputService = game:GetService("UserInputService")
 local CoreGui = game:GetService("CoreGui")
 local localPlayer = Players.LocalPlayer
 
-local MOON_BG     = Color3.fromRGB(13, 17, 30)
-local MOON_CARD   = Color3.fromRGB(22, 28, 48)
-local MOON_CARD2  = Color3.fromRGB(28, 34, 56)
-local MOON_STROKE = Color3.fromRGB(180, 190, 210)
-local MOON_TEXT   = Color3.fromRGB(235, 240, 250)
-local MOON_SUB    = Color3.fromRGB(150, 160, 180)
-local MOON_ACCENT = Color3.fromRGB(140, 170, 230)
-local MOON_GREEN  = Color3.fromRGB(110, 230, 150)
+-- 月の色
+local MOON_BG     = Color3.fromRGB(11, 15, 28)
+local MOON_CARD   = Color3.fromRGB(20, 26, 46)
+local MOON_CARD2  = Color3.fromRGB(30, 38, 62)
+local MOON_STROKE = Color3.fromRGB(170, 185, 215)
+local MOON_TEXT   = Color3.fromRGB(240, 244, 255)
+local MOON_SUB    = Color3.fromRGB(160, 172, 200)
+local MOON_ACCENT = Color3.fromRGB(130, 170, 240)
+local MOON_GREEN  = Color3.fromRGB(110, 235, 150)
 local MOON_RED    = Color3.fromRGB(240, 100, 110)
-local MOON_GOLD   = Color3.fromRGB(255, 214, 130)
-local MOON_GLOW   = Color3.fromRGB(200, 220, 255)
+local MOON_GOLD   = Color3.fromRGB(255, 218, 140)
+local MOON_GLOW   = Color3.fromRGB(210, 225, 255)
+
+-- 速度（ここだけ変更可能）
+local SPEED = 2500
 
 local function parentGui()
 	if typeof(gethui) == "function" then
@@ -87,9 +91,9 @@ end
 
 -- ネットワーク
 local networking = ReplicatedStorage:WaitForChild("Packages"):WaitForChild("Networking")
-local function safeRequire(getter)
-	local ok, result = pcall(function() return require(getter()) end)
-	return ok and result or nil
+local function safeRequire(g)
+	local ok, r = pcall(function() return require(g()) end)
+	return ok and r or nil
 end
 local EggState = safeRequire(function() return ReplicatedStorage.Client.EggState end)
 local Assets = safeRequire(function() return ReplicatedStorage.Data.Assets end)
@@ -100,12 +104,9 @@ local function remote(name)
 end
 
 local function root()
-	local character = localPlayer.Character
-	return character and character:FindFirstChild("HumanoidRootPart")
+	local c = localPlayer.Character
+	return c and c:FindFirstChild("HumanoidRootPart")
 end
-
--- ★ 速度（ここだけ 2500）
-local SPEED = 2500
 
 -- 状態
 local state = {
@@ -114,38 +115,44 @@ local state = {
 	PulledAt = 0, HeldSeen = 0, GuessedDrop = false,
 }
 
-print("[SHOUYU HUB] Part1 OK")-- ================================================================
--- Part 2/7 : Shield + Carry + 卵ヘルパー
+-- ステータス通知
+local statusCallback = function(s) end
+local function setStatus(s)
+	pcall(statusCallback, s)
+end
+
+print("[SHOUYU] Part1 OK")-- ================================================================
+-- Part 2/7 : Shield + Carry監視 + 卵ヘルパー
 -- ================================================================
 
--- Shield（Humanoid Swap）
+-- Shield (Humanoid Swap)
 local shield = { Original = nil, Clone = nil, Links = {}, Connection = nil, Added = nil }
 
-local function shieldControls(humanoid)
+local function shieldControls(h)
 	pcall(function()
 		local scripts = localPlayer:FindFirstChild("PlayerScripts")
 		local module = scripts and scripts:FindFirstChild("PlayerModule")
 		if module then
 			local controls = require(module):GetControls()
-			if type(controls) == "table" then controls.humanoid = humanoid end
+			if type(controls) == "table" then controls.humanoid = h end
 		end
 	end)
 end
 
-local function shieldAnimate(character)
-	local animate = character and character:FindFirstChild("Animate")
-	if animate and animate:IsA("LocalScript") then
+local function shieldAnimate(c)
+	local a = c and c:FindFirstChild("Animate")
+	if a and a:IsA("LocalScript") then
 		task.spawn(function()
-			animate.Enabled = false
+			a.Enabled = false
 			task.wait()
-			animate.Enabled = true
+			a.Enabled = true
 		end)
 	end
 end
 
 local function shieldUnlink()
-	for _, link in ipairs(shield.Links) do
-		pcall(function() link:Disconnect() end)
+	for _, l in ipairs(shield.Links) do
+		pcall(function() l:Disconnect() end)
 	end
 	table.clear(shield.Links)
 end
@@ -162,45 +169,31 @@ local function grounded(h)
 end
 
 local function shieldSwap()
-	local character = localPlayer.Character
-	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-	if not humanoid or humanoid.Health <= 0 then return end
-	if shield.Clone and shield.Clone.Parent == character then return end
-	if not grounded(humanoid) then return end
-	local clone = humanoid:Clone()
-	humanoid.Parent = nil
-	clone.Parent = character
+	local c = localPlayer.Character
+	local h = c and c:FindFirstChildOfClass("Humanoid")
+	if not h or h.Health <= 0 then return end
+	if shield.Clone and shield.Clone.Parent == c then return end
+	if not grounded(h) then return end
+	local clone = h:Clone()
+	h.Parent = nil
+	clone.Parent = c
 	workspace.CurrentCamera.CameraSubject = clone
 	shieldControls(clone)
-	shieldAnimate(character)
-	shield.Original = humanoid
+	shieldAnimate(c)
+	shield.Original = h
 	shield.Clone = clone
 	table.insert(shield.Links, clone.Died:Connect(function()
 		shieldUnlink()
 		shield.Original, shield.Clone = nil, nil
-		local current = localPlayer.Character
-		if current and humanoid.Parent == nil then
-			humanoid.Parent = current
-			workspace.CurrentCamera.CameraSubject = humanoid
-			shieldControls(humanoid)
+		local cur = localPlayer.Character
+		if cur and h.Parent == nil then
+			h.Parent = cur
+			workspace.CurrentCamera.CameraSubject = h
+			shieldControls(h)
 		end
 		pcall(function() clone:Destroy() end)
-		humanoid.Health = 0
+		h.Health = 0
 	end))
-end
-
-local function shieldUndo()
-	shieldUnlink()
-	local character = localPlayer.Character
-	local original, clone = shield.Original, shield.Clone
-	shield.Original, shield.Clone = nil, nil
-	if original and clone and character and original.Parent == nil and clone.Parent == character then
-		original.Parent = character
-		workspace.CurrentCamera.CameraSubject = original
-		shieldControls(original)
-		pcall(function() clone:Destroy() end)
-		shieldAnimate(character)
-	end
 end
 
 local function shieldStart()
@@ -208,20 +201,20 @@ local function shieldStart()
 	local n = 0
 	shield.Connection = RunService.Heartbeat:Connect(function(dt)
 		n += dt
-		local character = localPlayer.Character
-		local missing = not (shield.Clone and character and shield.Clone.Parent == character)
+		local c = localPlayer.Character
+		local missing = not (shield.Clone and c and shield.Clone.Parent == c)
 		if (missing and 0.25 or 3) <= n then
 			n = 0
 			shieldSwap()
 		end
 	end)
-	shield.Added = localPlayer.CharacterAdded:Connect(function(character)
+	shield.Added = localPlayer.CharacterAdded:Connect(function(c)
 		shieldUnlink()
 		shield.Original, shield.Clone = nil, nil
 		task.spawn(function()
-			character:WaitForChild("Humanoid", 10)
+			c:WaitForChild("Humanoid", 10)
 			task.wait(1)
-			if shield.Connection and localPlayer.Character == character then
+			if shield.Connection and localPlayer.Character == c then
 				shieldSwap()
 			end
 		end)
@@ -245,17 +238,19 @@ if type(EggState) == "table" and type(EggState.CarryChanged) == "table" and type
 end
 
 pcall(function()
-	remote("RE/EggWorld/FieldEggRedeemVerdict").OnClientEvent:Connect(function()
-		state.Delivered = os.clock()
-	end)
+	local r = remote("RE/EggWorld/FieldEggRedeemVerdict")
+	if r then r.OnClientEvent:Connect(function() state.Delivered = os.clock() end) end
 end)
 
 pcall(function()
-	remote("RE/RigSync/Refresh").OnClientEvent:Connect(function(arg)
-		if type(arg) == "table" and arg.Action == "Relocate" then
-			state.PulledAt = os.clock()
-		end
-	end)
+	local r = remote("RE/RigSync/Refresh")
+	if r then
+		r.OnClientEvent:Connect(function(arg)
+			if type(arg) == "table" and arg.Action == "Relocate" then
+				state.PulledAt = os.clock()
+			end
+		end)
+	end
 end)
 
 -- 卵ヘルパー
@@ -272,15 +267,13 @@ local function dropEgg()
 end
 
 local function promptNear(position, radius)
-	local best, bestDistance = nil, radius
+	local best, bestD = nil, radius
 	for _, child in ipairs(workspace:GetChildren()) do
 		if child.Name == "SmartPromptPart" and child:IsA("BasePart") then
-			local prompt = child:FindFirstChild("CarryAreaEgg")
-			if prompt and prompt:IsA("ProximityPrompt") then
-				local distance = (child.Position - position).Magnitude
-				if distance < bestDistance then
-					best, bestDistance = prompt, distance
-				end
+			local p = child:FindFirstChild("CarryAreaEgg")
+			if p and p:IsA("ProximityPrompt") then
+				local d = (child.Position - position).Magnitude
+				if d < bestD then best, bestD = p, d end
 			end
 		end
 	end
@@ -288,14 +281,14 @@ local function promptNear(position, radius)
 end
 
 local function heldByMe(uid)
-	local character = localPlayer.Character
-	if type(uid) ~= "string" or not character then return false end
+	local c = localPlayer.Character
+	if type(uid) ~= "string" or not c then return false end
 	local egg = workspace:FindFirstChild(uid)
 	if not egg then return false end
 	for _, d in ipairs(egg:GetDescendants()) do
 		if d:IsA("WeldConstraint") or d:IsA("JointInstance") then
 			local ok, a, b = pcall(function() return d.Part0, d.Part1 end)
-			if ok and ((a and a:IsDescendantOf(character)) or (b and b:IsDescendantOf(character))) then
+			if ok and ((a and a:IsDescendantOf(c)) or (b and b:IsDescendantOf(c))) then
 				return true
 			end
 		end
@@ -320,9 +313,9 @@ end)
 
 local function snapshot()
 	local out = {}
-	local ok, result = pcall(function()
-		return remote("RF/EggWorld/AskFieldEggSnapshot"):InvokeServer()
-	end)
+	local rf = remote("RF/EggWorld/AskFieldEggSnapshot")
+	if not rf or not rf:IsA("RemoteFunction") then return out end
+	local ok, result = pcall(rf.InvokeServer, rf)
 	local records = ok and type(result) == "table" and result.Records or nil
 	if type(records) ~= "table" then return out end
 	for _, r in pairs(records) do
@@ -345,7 +338,7 @@ end
 local function describe(r)
 	local dir = type(Assets) == "table" and Assets.Directory or nil
 	local e = type(dir) == "table" and dir[tostring(r.AssetCategory)] or nil
-	local info = { Uid = r.Uid, Category = tostring(r.AssetCategory), Name = tostring(r.AssetCategory), Icon = "", Value = 0, Rarity = 0 }
+	local info = { Uid = r.Uid, Name = tostring(r.AssetCategory), Icon = "", Value = 0, Rarity = 0 }
 	if type(e) == "table" then
 		info.Name = tostring(e.DisplayName or r.AssetCategory)
 		local icon = e.Icon
@@ -376,16 +369,16 @@ local function money(v)
 	return string.format("$%d/s", math.floor(v+0.5))
 end
 
-print("[SHOUYU HUB] Part2 OK")-- ================================================================
--- Part 3/7 : 移動ヘルパー（速度2500）
+print("[SHOUYU] Part2 OK")-- ================================================================
+-- Part 3/7 : 移動ヘルパー
 -- ================================================================
 
 local function lineInfo()
-	local world = workspace:FindFirstChild("World") or workspace:FindFirstChild("__OBJECTS")
-	world = world and world:FindFirstChild("Areas")
-	world = world and world:FindFirstChild("SeparationLine")
-	local ok = world and world:IsA("BasePart")
-	return ok and world.Position.X or 552.2, ok and world.Position.Y or 67.67
+	local w = workspace:FindFirstChild("World") or workspace:FindFirstChild("__OBJECTS")
+	w = w and w:FindFirstChild("Areas")
+	w = w and w:FindFirstChild("SeparationLine")
+	local ok = w and w:IsA("BasePart")
+	return ok and w.Position.X or 552.2, ok and w.Position.Y or 67.67
 end
 
 local function homePoint()
@@ -503,16 +496,16 @@ local function avoid(from, to)
 	return to
 end
 
--- runToEgg（速度2500）
+-- runToEgg
 local function runToEgg(uid, egg)
 	local lineX = lineInfo()
 	local home = homePoint()
-	local character = localPlayer.Character
-	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-	if humanoid then
-		humanoid.PlatformStand = false
-		if character:FindFirstChildWhichIsA("Tool") then
-			pcall(function() humanoid:UnequipTools() end)
+	local c = localPlayer.Character
+	local h = c and c:FindFirstChildOfClass("Humanoid")
+	if h then
+		h.PlatformStand = false
+		if c:FindFirstChildWhichIsA("Tool") then
+			pcall(function() h:UnequipTools() end)
 		end
 	end
 
@@ -544,11 +537,11 @@ local function runToEgg(uid, egg)
 		local v = unit * math.min(SPEED, flat.Magnitude / 0.05)
 		pcall(function()
 			r.AssemblyLinearVelocity = Vector3.new(v.X, r.AssemblyLinearVelocity.Y, v.Z)
-			if humanoid and unit.Magnitude > 0 then humanoid:Move(unit, false) end
+			if h and unit.Magnitude > 0 then h:Move(unit, false) end
 		end)
 		if os.clock() - lastCheck >= 1.5 then
-			if (r.Position - lastPos).Magnitude < 3 and humanoid and flatEgg.Magnitude > 15 then
-				pcall(function() humanoid.Jump = true end)
+			if (r.Position - lastPos).Magnitude < 3 and h and flatEgg.Magnitude > 15 then
+				pcall(function() h.Jump = true end)
 			end
 			lastPos, lastCheck = r.Position, os.clock()
 		end
@@ -562,24 +555,21 @@ local function runToEgg(uid, egg)
 	if r then
 		pcall(function()
 			r.AssemblyLinearVelocity = Vector3.new(0, r.AssemblyLinearVelocity.Y, 0)
-			if humanoid then humanoid:Move(Vector3.zero, false) end
+			if h then h:Move(Vector3.zero, false) end
 		end)
 	end
 	return state.Carrying
 		or (r ~= nil and Vector3.new(egg.X - r.Position.X, 0, egg.Z - r.Position.Z).Magnitude <= 6)
 end
 
--- grab（速度2500）
+-- grab
 local function eggNow(uid, cache)
 	local node = workspace:FindFirstChild(uid)
 	local slots = workspace:FindFirstChild("AreaEggSlotsClient")
 	node = node or (slots and slots:FindFirstChild(uid))
 	if node then
 		local ok, pos = pcall(function() return node:GetPivot().Position end)
-		if ok and pos then
-			cache.Pos, cache.At = pos, os.clock()
-			return pos
-		end
+		if ok and pos then cache.Pos, cache.At = pos, os.clock(); return pos end
 	end
 	if os.clock() - cache.At >= 0.5 then
 		cache.At = os.clock()
@@ -609,10 +599,10 @@ local function grab(uid, timeout)
 			end
 			if since >= 0.03 then
 				since = 0
-				local prompt = promptNear(egg - Vector3.new(0, 3, 0), 10)
-				if prompt and typeof(fireproximityprompt) == "function" then
-					pcall(function() prompt.HoldDuration = 0 end)
-					pcall(fireproximityprompt, prompt)
+				local p = promptNear(egg - Vector3.new(0, 3, 0), 10)
+				if p and typeof(fireproximityprompt) == "function" then
+					pcall(function() p.HoldDuration = 0 end)
+					pcall(fireproximityprompt, p)
 				end
 				task.spawn(takeEgg, uid)
 			end
@@ -637,7 +627,7 @@ local function regrab(uid)
 	return grab(uid, 3)
 end
 
--- runHome（速度2500）
+-- runHome
 local function runHome(lineX, laneZ)
 	local started = os.clock()
 	local home = homePoint()
@@ -645,20 +635,19 @@ local function runHome(lineX, laneZ)
 	local height = 70
 	local share = 0.5
 	local descent = height * math.sqrt(1 - share * share) / share
-	local character = localPlayer.Character
-	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-	if humanoid then humanoid.PlatformStand = false end
+	local c = localPlayer.Character
+	local h = c and c:FindFirstChildOfClass("Humanoid")
+	if h then h.PlatformStand = false end
 
 	local r = root()
-	if r and character and height > 0.5 and home.Y + height - 2 > r.Position.Y then
+	if r and c and home.Y + height - 2 > r.Position.Y then
 		pcall(function()
-			character:PivotTo(CFrame.new(Vector3.new(r.Position.X, home.Y + height, r.Position.Z)) * r.CFrame.Rotation)
+			c:PivotTo(CFrame.new(Vector3.new(r.Position.X, home.Y + height, r.Position.Z)) * r.CFrame.Rotation)
 			r.AssemblyLinearVelocity = Vector3.zero
 			r.AssemblyAngularVelocity = Vector3.zero
 		end)
 	end
 
-	local speed = SPEED
 	local last = os.clock()
 	local timeout = 0
 	while state.Carrying and state.Delivered < started and not state.Cancel and timeout < 25 do
@@ -678,18 +667,16 @@ local function runHome(lineX, laneZ)
 		if toHome or remaining <= descent then
 			wantY = home.Y + height * math.clamp(remaining / math.max(descent, 1), 0, 1)
 		end
-		local vy = math.clamp((wantY - r.Position.Y) / 0.12, -speed * share, speed * share)
-		local horizontal = math.sqrt(math.max(speed * speed - vy * vy, 0))
+		local vy = math.clamp((wantY - r.Position.Y) / 0.12, -SPEED * share, SPEED * share)
+		local horizontal = math.sqrt(math.max(SPEED * SPEED - vy * vy, 0))
 		local v = flat.Magnitude > 0.01
 			and flat.Unit * math.min(horizontal, flat.Magnitude / 0.05)
 			or Vector3.zero
-		pcall(function()
-			r.AssemblyLinearVelocity = Vector3.new(v.X, vy, v.Z)
-		end)
+		pcall(function() r.AssemblyLinearVelocity = Vector3.new(v.X, vy, v.Z) end)
 		RunService.Heartbeat:Wait()
 	end
 
-	if humanoid then pcall(function() humanoid:Move(Vector3.zero, false) end) end
+	if h then pcall(function() h:Move(Vector3.zero, false) end) end
 	local settle = 0
 	while settle < 2 and state.Delivered < started and state.Carrying and not state.Cancel do
 		settle += RunService.Heartbeat:Wait()
@@ -705,21 +692,21 @@ local function runHome(lineX, laneZ)
 	return state.Delivered >= started
 end
 
-print("[SHOUYU HUB] Part3 OK")-- ================================================================
--- Part 4/7 : Instant TP + メインスティール
+print("[SHOUYU] Part3 OK")-- ================================================================
+-- Part 4/7 : Instant TP + スティール実行
 -- ================================================================
 
 local function frozenCamera()
-	local camera = workspace.CurrentCamera
-	if not camera then return function() end end
-	local oldType = camera.CameraType
-	local frame = camera.CFrame
+	local cam = workspace.CurrentCamera
+	if not cam then return function() end end
+	local oldType = cam.CameraType
+	local frame = cam.CFrame
 	pcall(function()
-		camera.CameraType = Enum.CameraType.Scriptable
-		camera.CFrame = frame
+		cam.CameraType = Enum.CameraType.Scriptable
+		cam.CFrame = frame
 	end)
 	return function()
-		pcall(function() camera.CameraType = oldType end)
+		pcall(function() cam.CameraType = oldType end)
 	end
 end
 
@@ -745,18 +732,18 @@ end
 
 local stealClone = nil
 local function dropClone()
-	local copy = stealClone
+	local c = stealClone
 	stealClone = nil
-	if copy then pcall(function() copy:Destroy() end) end
+	if c then pcall(function() c:Destroy() end) end
 end
 local function postClone()
 	dropClone()
-	local character = localPlayer.Character
-	if not character then return end
-	local was = character.Archivable
-	character.Archivable = true
-	local copy = character:Clone()
-	character.Archivable = was
+	local c = localPlayer.Character
+	if not c then return end
+	local was = c.Archivable
+	c.Archivable = true
+	local copy = c:Clone()
+	c.Archivable = was
 	if copy then
 		for _, d in ipairs(copy:GetDescendants()) do
 			if d:IsA("LuaSourceContainer") or d:IsA("Humanoid") then
@@ -811,8 +798,8 @@ local function instantTP(uid)
 	while x - hopStep > landing.X and not state.Cancel do
 		if not state.Carrying then
 			if not regrab(uid) then break end
-			local current = root()
-			if current then x = math.min(x, current.Position.X) end
+			local cur = root()
+			if cur then x = math.min(x, cur.Position.X) end
 			continue
 		end
 		local nextX = x - hopStep
@@ -843,15 +830,15 @@ local function instantTP(uid)
 
 	landing = Vector3.new(landing.X, groundY(landing, landing.Y), landing.Z)
 	local function land()
-		local current = root()
-		if current and current.Position.X <= landing.X + 1 and current.Position.Y > landing.Y - 25 then
-			pcall(function() current.AssemblyLinearVelocity = Vector3.zero end)
+		local cur = root()
+		if cur and cur.Position.X <= landing.X + 1 and cur.Position.Y > landing.Y - 25 then
+			pcall(function() cur.AssemblyLinearVelocity = Vector3.zero end)
 			return
 		end
 		place(landing)
 	end
 	land()
-	for attempt = 1, 3 do
+	for _ = 1, 3 do
 		local settle = 0
 		while settle < 0.08 and not state.Cancel do
 			settle += RunService.Heartbeat:Wait()
@@ -876,11 +863,11 @@ local function instantTP(uid)
 		while state.Carrying and waited < 1 and not state.Cancel do
 			waited += RunService.Heartbeat:Wait()
 		end
-		local current = root()
-		if current then
+		local cur = root()
+		if cur then
 			pcall(function()
-				current.AssemblyLinearVelocity = Vector3.zero
-				current.AssemblyAngularVelocity = Vector3.zero
+				cur.AssemblyLinearVelocity = Vector3.zero
+				cur.AssemblyAngularVelocity = Vector3.zero
 			end)
 		end
 		releaseCamera()
@@ -898,12 +885,7 @@ local function instantTP(uid)
 	return ok or state.Delivered >= started
 end
 
--- メイン処理
-local onStatus = function(s) end
-local function setStatus(s)
-	pcall(onStatus, s)
-end
-
+-- スティール実行（外から呼ぶ）
 local function stealAndDeliver(uid, instant)
 	if state.Busy then return end
 	state.Busy = true
@@ -912,7 +894,10 @@ local function stealAndDeliver(uid, instant)
 		local ok, err = pcall(function()
 			setStatus("卵を探しています")
 			local egg = eggPosition(uid)
-			if not egg then setStatus("卵が消えました") return end
+			if not egg then
+				setStatus("卵が消えました")
+				return
+			end
 			if state.Carrying and state.Uid ~= uid then
 				dropEgg()
 				local waited = 0
@@ -921,6 +906,7 @@ local function stealAndDeliver(uid, instant)
 				end
 			end
 			fpsOn()
+
 			if instant then
 				setStatus("即盗み開始")
 				local r = root()
@@ -951,6 +937,7 @@ local function stealAndDeliver(uid, instant)
 					return
 				end
 			end
+
 			local delivered = instantTP(uid)
 			setStatus(delivered and "納品完了" or "納品失敗")
 		end)
@@ -961,7 +948,7 @@ local function stealAndDeliver(uid, instant)
 	end)
 end
 
-print("[SHOUYU HUB] Part4 OK")-- ================================================================
+print("[SHOUYU] Part4 OK")-- ================================================================
 -- Part 5/7 : UI本体
 -- ================================================================
 
@@ -977,9 +964,8 @@ local gui = make("ScreenGui", {
 })
 gui.Parent = parentGui()
 
-local W, H = 260, 400
+local W, H = 380, 640
 local window = make("Frame", {
-	Name = "MainWindow",
 	Size = UDim2.fromOffset(W, H),
 	Position = UDim2.new(0.5, -W/2, 0.5, -H/2),
 	BackgroundColor3 = MOON_BG,
@@ -987,13 +973,12 @@ local window = make("Frame", {
 	ClipsDescendants = true,
 })
 window.Parent = gui
-corner(window, 14)
-livingStroke(window, 1.5, true)
+corner(window, 18)
+livingStroke(window, 2, true)
 
--- 動く効果
+-- 動く光
 do
-	local tick = 0
-	local rot = 0
+	local tick, rot = 0, 0
 	RunService.Heartbeat:Connect(function(dt)
 		tick += 1
 		if tick % 2 ~= 0 then return end
@@ -1006,10 +991,10 @@ do
 	end)
 end
 
--- ヘッダー
+------------------------------------------------------------------ ヘッダー
+local HEADER_H = 90
 local header = make("Frame", {
-	Name = "Header",
-	Size = UDim2.new(1, 0, 0, 60),
+	Size = UDim2.new(1, 0, 0, HEADER_H),
 	Position = UDim2.fromOffset(0, 0),
 	BackgroundColor3 = MOON_CARD,
 	BorderSizePixel = 0,
@@ -1019,42 +1004,44 @@ make("Frame", {
 	Size = UDim2.new(1, 0, 0, 1),
 	Position = UDim2.new(0, 0, 1, 0),
 	BackgroundColor3 = MOON_STROKE,
-	BackgroundTransparency = 0.7,
+	BackgroundTransparency = 0.6,
 	BorderSizePixel = 0,
 }).Parent = header
 
--- ロゴ（月）
+-- 月ロゴ
+local logoSize = 56
 local logoFrame = make("Frame", {
-	Size = UDim2.fromOffset(38, 38),
-	Position = UDim2.fromOffset(12, 11),
+	Size = UDim2.fromOffset(logoSize, logoSize),
+	Position = UDim2.fromOffset(16, 17),
 	BackgroundColor3 = MOON_GLOW,
 	BorderSizePixel = 0,
 })
 logoFrame.Parent = header
-corner(logoFrame, 19)
+corner(logoFrame, logoSize / 2)
 local moonShadow = make("Frame", {
-	Size = UDim2.fromOffset(30, 30),
-	Position = UDim2.fromOffset(10, -2),
+	Size = UDim2.fromOffset(logoSize - 12, logoSize - 12),
+	Position = UDim2.fromOffset(14, -3),
 	BackgroundColor3 = MOON_CARD,
 	BorderSizePixel = 0,
 })
 moonShadow.Parent = logoFrame
-corner(moonShadow, 15)
+corner(moonShadow, (logoSize - 12) / 2)
 
 txt(header, {
-	Size = UDim2.new(1, -110, 0, 20),
-	Position = UDim2.fromOffset(58, 10),
+	Size = UDim2.new(1, -160, 0, 26),
+	Position = UDim2.fromOffset(84, 20),
 	Font = Enum.Font.GothamBlack,
-	TextSize = 15,
+	TextSize = 22,
 	TextXAlignment = Enum.TextXAlignment.Left,
 	Text = "SHOUYU HUB",
+	TextColor3 = Color3.fromRGB(255, 120, 120),
 	Living = false,
 })
 txt(header, {
-	Size = UDim2.new(1, -110, 0, 14),
-	Position = UDim2.fromOffset(58, 32),
+	Size = UDim2.new(1, -160, 0, 18),
+	Position = UDim2.fromOffset(84, 50),
 	Font = Enum.Font.Gotham,
-	TextSize = 10,
+	TextSize = 13,
 	TextXAlignment = Enum.TextXAlignment.Left,
 	Text = "STEAL AN EGG",
 	TextColor3 = MOON_SUB,
@@ -1062,82 +1049,113 @@ txt(header, {
 })
 
 local minBtn = make("TextButton", {
-	Size = UDim2.fromOffset(28, 28),
-	Position = UDim2.new(1, -70, 0, 16),
+	Size = UDim2.fromOffset(40, 40),
+	Position = UDim2.new(1, -100, 0, 25),
 	BackgroundColor3 = MOON_CARD2,
 	Font = Enum.Font.GothamBlack,
-	TextSize = 16, TextColor3 = MOON_TEXT,
-	Text = "-", AutoButtonColor = false,
+	TextSize = 22,
+	TextColor3 = MOON_TEXT,
+	Text = "-",
+	AutoButtonColor = false,
+	BorderSizePixel = 0,
 })
 minBtn.Parent = header
-corner(minBtn, 6)
-livingStroke(minBtn, 1, false)
+corner(minBtn, 8)
+livingStroke(minBtn, 1.5, false)
 
 local closeBtn = make("TextButton", {
-	Size = UDim2.fromOffset(28, 28),
-	Position = UDim2.new(1, -36, 0, 16),
+	Size = UDim2.fromOffset(40, 40),
+	Position = UDim2.new(1, -52, 0, 25),
 	BackgroundColor3 = MOON_RED,
 	Font = Enum.Font.GothamBlack,
-	TextSize = 14, TextColor3 = MOON_TEXT,
-	Text = "X", AutoButtonColor = false,
+	TextSize = 20,
+	TextColor3 = MOON_TEXT,
+	Text = "X",
+	AutoButtonColor = false,
+	BorderSizePixel = 0,
 })
 closeBtn.Parent = header
-corner(closeBtn, 6)
+corner(closeBtn, 8)
 
--- ステータス行
+------------------------------------------------------------------ ステータス行
 local statusRow = make("Frame", {
-	Size = UDim2.new(1, -16, 0, 22),
-	Position = UDim2.fromOffset(8, 68),
+	Size = UDim2.new(1, -24, 0, 32),
+	Position = UDim2.fromOffset(12, HEADER_H + 12),
 	BackgroundTransparency = 1,
 })
 statusRow.Parent = window
 
 local statusLabel = txt(statusRow, {
-	Size = UDim2.new(1, -110, 1, 0),
-	Position = UDim2.fromOffset(4, 0),
+	Size = UDim2.new(1, -180, 1, 0),
+	Position = UDim2.fromOffset(6, 0),
 	Font = Enum.Font.GothamMedium,
-	TextSize = 10,
+	TextSize = 14,
 	TextXAlignment = Enum.TextXAlignment.Left,
 	Text = "待機中...",
 	TextColor3 = MOON_ACCENT,
 })
-onStatus = function(s) statusLabel.Text = tostring(s) end
+statusCallback = function(s) statusLabel.Text = tostring(s) end
 
--- 卵リスト
+local autoUpdateBtn = make("TextButton", {
+	Size = UDim2.fromOffset(150, 30),
+	Position = UDim2.new(1, -156, 0, 1),
+	BackgroundColor3 = MOON_CARD2,
+	Font = Enum.Font.GothamBold,
+	TextSize = 13,
+	TextColor3 = MOON_TEXT,
+	Text = "自動更新  ON",
+	AutoButtonColor = false,
+	BorderSizePixel = 0,
+})
+autoUpdateBtn.Parent = statusRow
+corner(autoUpdateBtn, 7)
+livingStroke(autoUpdateBtn, 1, false)
+
+local autoUpdateOn = true
+autoUpdateBtn.MouseButton1Click:Connect(function()
+	autoUpdateOn = not autoUpdateOn
+	autoUpdateBtn.Text = autoUpdateOn and "自動更新  ON" or "自動更新  OFF"
+	autoUpdateBtn.TextColor3 = autoUpdateOn and MOON_GREEN or MOON_SUB
+end)
+
+------------------------------------------------------------------ 卵リスト
+local BOTTOM_BTN_H = 60
+local listTop = HEADER_H + 12 + 32 + 12
+local listH = H - listTop - BOTTOM_BTN_H - 20
+
 local list = make("ScrollingFrame", {
-	Name = "EggList",
-	Size = UDim2.new(1, -16, 1, -68 - 22 - 16 - 48),
-	Position = UDim2.fromOffset(8, 96),
+	Size = UDim2.new(1, -24, 0, listH),
+	Position = UDim2.fromOffset(12, listTop),
 	BackgroundColor3 = MOON_CARD,
 	BorderSizePixel = 0,
-	ScrollBarThickness = 3,
+	ScrollBarThickness = 5,
 	ScrollBarImageColor3 = MOON_STROKE,
 	CanvasSize = UDim2.new(),
 	AutomaticCanvasSize = Enum.AutomaticSize.Y,
 })
 list.Parent = window
-corner(list, 10)
-livingStroke(list, 1, false)
+corner(list, 12)
+livingStroke(list, 1.5, false)
 make("UIListLayout", {
-	Padding = UDim.new(0, 4),
+	Padding = UDim.new(0, 6),
 	SortOrder = Enum.SortOrder.LayoutOrder,
 }).Parent = list
 make("UIPadding", {
-	PaddingTop = UDim.new(0, 6),
-	PaddingBottom = UDim.new(0, 6),
-	PaddingLeft = UDim.new(0, 6),
-	PaddingRight = UDim.new(0, 6),
+	PaddingTop = UDim.new(0, 8),
+	PaddingBottom = UDim.new(0, 8),
+	PaddingLeft = UDim.new(0, 8),
+	PaddingRight = UDim.new(0, 8),
 }).Parent = list
 
 local rarityColors = {
-	Color3.fromRGB(200, 210, 230),
+	Color3.fromRGB(210, 220, 240),
 	Color3.fromRGB(160, 220, 200),
 	Color3.fromRGB(140, 190, 240),
-	Color3.fromRGB(180, 170, 240),
-	Color3.fromRGB(220, 200, 140),
-	Color3.fromRGB(240, 160, 160),
-	Color3.fromRGB(240, 180, 220),
-	Color3.fromRGB(180, 230, 240),
+	Color3.fromRGB(190, 180, 250),
+	Color3.fromRGB(230, 205, 145),
+	Color3.fromRGB(245, 165, 165),
+	Color3.fromRGB(245, 185, 225),
+	Color3.fromRGB(180, 235, 240),
 }
 
 local rows = {}
@@ -1147,10 +1165,8 @@ local function setSelected(uid)
 	selectedUid = uid
 	for rowUid, row in pairs(rows) do
 		local on = rowUid == uid
-		row.Stroke.Thickness = on and 1.8 or 1
-		row.Gradient.Color = on
-			and bands(MOON_GLOW, MOON_ACCENT)
-			or bands(MOON_STROKE, MOON_CARD)
+		row.Stroke.Thickness = on and 2 or 1
+		row.Stroke.Color = on and MOON_GLOW or MOON_STROKE
 		row.Frame.BackgroundColor3 = on and MOON_CARD2 or MOON_CARD
 	end
 end
@@ -1158,29 +1174,27 @@ end
 local function rebuild()
 	for _, row in pairs(rows) do row.Frame:Destroy() end
 	table.clear(rows)
-	for i = #living, 1, -1 do
-		if not living[i].Parent then table.remove(living, i) end
-	end
 
 	local infos = {}
 	for _, r in ipairs(snapshot()) do infos[#infos+1] = describe(r) end
 	table.sort(infos, function(a, b) return a.Value > b.Value end)
 
 	if #infos == 0 then
-		txt(list, {
-			Size = UDim2.new(1, 0, 0, 40),
+		local empty = txt(list, {
+			Size = UDim2.new(1, 0, 0, 50),
 			Font = Enum.Font.Gotham,
-			TextSize = 11,
+			TextSize = 14,
 			TextColor3 = MOON_SUB,
 			Text = "フィールドに卵がありません",
 		})
+		empty.Name = "EmptyMsg"
 		statusLabel.Text = "待機中..."
 		return
 	end
 
 	for i, info in ipairs(infos) do
 		local frame = make("TextButton", {
-			Size = UDim2.new(1, 0, 0, 44),
+			Size = UDim2.new(1, 0, 0, 60),
 			BackgroundColor3 = MOON_CARD,
 			LayoutOrder = i,
 			Text = "",
@@ -1188,21 +1202,21 @@ local function rebuild()
 			BorderSizePixel = 0,
 		})
 		frame.Parent = list
-		corner(frame, 8)
-		local rowStroke, rowGradient = livingStroke(frame, 1, false)
+		corner(frame, 10)
+		local rowStroke = livingStroke(frame, 1, false)
 
 		local iconBox = make("Frame", {
-			Size = UDim2.fromOffset(32, 32),
-			Position = UDim2.fromOffset(6, 6),
+			Size = UDim2.fromOffset(44, 44),
+			Position = UDim2.fromOffset(8, 8),
 			BackgroundColor3 = MOON_BG,
 			BorderSizePixel = 0,
 		})
 		iconBox.Parent = frame
-		corner(iconBox, 6)
-
+		corner(iconBox, 8)
 		if info.Icon ~= "" then
 			make("ImageLabel", {
-				Size = UDim2.fromScale(1, 1),
+				Size = UDim2.fromScale(0.9, 0.9),
+				Position = UDim2.fromScale(0.05, 0.05),
 				BackgroundTransparency = 1,
 				Image = info.Icon,
 				ScaleType = Enum.ScaleType.Fit,
@@ -1211,26 +1225,26 @@ local function rebuild()
 		end
 
 		txt(frame, {
-			Size = UDim2.new(1, -50, 0, 15),
-			Position = UDim2.fromOffset(44, 6),
+			Size = UDim2.new(1, -70, 0, 22),
+			Position = UDim2.fromOffset(60, 10),
 			Font = Enum.Font.GothamBold,
-			TextSize = 11,
+			TextSize = 15,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			TextTruncate = Enum.TextTruncate.AtEnd,
 			Text = info.Name,
 			TextColor3 = rarityColors[math.clamp(info.Rarity, 1, #rarityColors)] or MOON_TEXT,
 		})
 		txt(frame, {
-			Size = UDim2.new(1, -50, 0, 13),
-			Position = UDim2.fromOffset(44, 23),
+			Size = UDim2.new(1, -70, 0, 18),
+			Position = UDim2.fromOffset(60, 33),
 			Font = Enum.Font.GothamMedium,
-			TextSize = 10,
+			TextSize = 13,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			Text = money(info.Value),
 			TextColor3 = MOON_SUB,
 		})
 
-		rows[info.Uid] = { Frame = frame, Stroke = rowStroke, Gradient = rowGradient }
+		rows[info.Uid] = { Frame = frame, Stroke = rowStroke }
 		frame.MouseButton1Click:Connect(function()
 			setSelected(info.Uid)
 			statusLabel.Text = "選択中: " .. info.Name
@@ -1239,32 +1253,32 @@ local function rebuild()
 	statusLabel.Text = string.format("%d 個の卵を検出", #infos)
 end
 
-print("[SHOUYU HUB] Part5 OK")-- ================================================================
--- Part 6/7 : ボタン + ドラッグ + 最小化
+print("[SHOUYU] Part5 OK")-- ================================================================
+-- Part 6/7 : ボタン + ロジック接続（★ここが動く鍵）
 -- ================================================================
 
-local buttonRow = make("Frame", {
-	Size = UDim2.new(1, -16, 0, 40),
-	Position = UDim2.new(0, 8, 1, -48),
+local btnRow = make("Frame", {
+	Size = UDim2.new(1, -24, 0, 48),
+	Position = UDim2.new(0, 12, 1, -60),
 	BackgroundTransparency = 1,
 })
-buttonRow.Parent = window
+btnRow.Parent = window
 
 local function bottomButton(label, posX, sizeX, bg, textColor)
 	local b = make("TextButton", {
-		Size = UDim2.new(sizeX, -4, 1, 0),
-		Position = UDim2.new(posX, 4, 0, 0),
+		Size = UDim2.new(sizeX, -6, 1, 0),
+		Position = UDim2.new(posX, 6, 0, 0),
 		BackgroundColor3 = bg,
 		Font = Enum.Font.GothamBold,
-		TextSize = 11,
+		TextSize = 14,
 		TextColor3 = textColor,
 		Text = label,
 		AutoButtonColor = false,
 		BorderSizePixel = 0,
 	})
-	b.Parent = buttonRow
-	corner(b, 8)
-	livingStroke(b, 1, true)
+	b.Parent = btnRow
+	corner(b, 10)
+	livingStroke(b, 1.5, true)
 	return b
 end
 
@@ -1272,32 +1286,39 @@ local refreshBtn = bottomButton("更新", 0, 0.34, MOON_CARD2, MOON_TEXT)
 local autoBtn = bottomButton("自動盗み", 0.34, 0.33, MOON_CARD2, MOON_TEXT)
 local instantBtn = bottomButton("即盗み", 0.67, 0.33, MOON_ACCENT, MOON_BG)
 
--- 更新
+------------------------------------------------------------------ 更新ボタン
 refreshBtn.MouseButton1Click:Connect(function()
+	if state.Busy then
+		statusLabel.Text = "実行中は更新できません"
+		return
+	end
 	rebuild()
 	statusLabel.Text = "更新しました"
 end)
 
--- Auto Steal
+------------------------------------------------------------------ 自動盗みボタン
 local autoRunning = false
-local autoThread = nil
 autoBtn.MouseButton1Click:Connect(function()
 	if autoRunning then
 		autoRunning = false
 		autoBtn.Text = "自動盗み"
 		autoBtn.BackgroundColor3 = MOON_CARD2
 		autoBtn.TextColor3 = MOON_TEXT
+		state.Cancel = true
 		statusLabel.Text = "自動盗み 停止"
 		return
 	end
+
 	autoRunning = true
 	autoBtn.Text = "自動盗み ON"
 	autoBtn.BackgroundColor3 = MOON_GREEN
 	autoBtn.TextColor3 = MOON_BG
 	statusLabel.Text = "自動盗み 開始"
+
 	task.spawn(function()
 		while autoRunning do
-			if not state.Busy and not state.Carrying then
+			if not state.Busy and not state.Carrying and not state.Cancel then
+				-- 一番価値の高い卵を探す
 				local infos = {}
 				for _, r in ipairs(snapshot()) do infos[#infos+1] = describe(r) end
 				table.sort(infos, function(a, b) return a.Value > b.Value end)
@@ -1311,7 +1332,7 @@ autoBtn.MouseButton1Click:Connect(function()
 	end)
 end)
 
--- 即盗み
+------------------------------------------------------------------ 即盗みボタン
 instantBtn.MouseButton1Click:Connect(function()
 	if not selectedUid then
 		statusLabel.Text = "先に卵を選んでください"
@@ -1321,10 +1342,11 @@ instantBtn.MouseButton1Click:Connect(function()
 		statusLabel.Text = "実行中です"
 		return
 	end
+	-- ★ 直接ロジック呼び出し
 	stealAndDeliver(selectedUid, true)
 end)
 
--- ドラッグ
+------------------------------------------------------------------ ドラッグ
 do
 	local dragging, startPos, startInput
 	header.InputBegan:Connect(function(input)
@@ -1332,16 +1354,13 @@ do
 			or input.UserInputType == Enum.UserInputType.Touch then
 			dragging, startPos, startInput = true, window.Position, input.Position
 			input.Changed:Connect(function()
-				if input.UserInputState == Enum.UserInputState.End then
-					dragging = false
-				end
+				if input.UserInputState == Enum.UserInputState.End then dragging = false end
 			end)
 		end
 	end)
 	UserInputService.InputChanged:Connect(function(input)
-		if dragging
-			and (input.UserInputType == Enum.UserInputType.MouseMovement
-				or input.UserInputType == Enum.UserInputType.Touch) then
+		if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+			or input.UserInputType == Enum.UserInputType.Touch) then
 			local d = input.Position - startInput
 			window.Position = UDim2.new(
 				startPos.X.Scale, startPos.X.Offset + d.X,
@@ -1351,89 +1370,32 @@ do
 	end)
 end
 
+------------------------------------------------------------------ 最小化・閉じる
 local minimized = false
 minBtn.MouseButton1Click:Connect(function()
 	minimized = not minimized
-	window.Size = minimized and UDim2.fromOffset(W, 60) or UDim2.fromOffset(W, H)
+	window.Size = minimized and UDim2.fromOffset(W, HEADER_H) or UDim2.fromOffset(W, H)
 end)
 
 closeBtn.MouseButton1Click:Connect(function()
+	autoRunning = false
+	state.Cancel = true
 	gui.Enabled = false
 end)
 
-print("[SHOUYU HUB] Part6 OK")-- ================================================================
--- Part 7/7 : 起動 + 自動更新 + オートエグゼキューター
+print("[SHOUYU] Part6 OK")-- ================================================================
+-- Part 7/7 : 起動
 -- ================================================================
 
 -- 自動更新ループ
 task.spawn(function()
 	while gui.Parent do
 		task.wait(5)
-		if gui.Enabled and not state.Busy and not minimized then
+		if gui.Enabled and autoUpdateOn and not minimized and not state.Busy then
 			pcall(rebuild)
 		end
 	end
 end)
-
--- オートエグゼキューター
-do
-	local TeleportService = game:GetService("TeleportService")
-	local function getQueueOnTeleport()
-		if type(queue_on_teleport) == "function" then return queue_on_teleport end
-		if type(queueonteleport) == "function" then return queueonteleport end
-		if type(syn) == "table" and type(syn.queue_on_teleport) == "function" then
-			return syn.queue_on_teleport
-		end
-		if type(fluxus) == "table" and type(fluxus.queue_on_teleport) == "function" then
-			return fluxus.queue_on_teleport
-		end
-		return nil
-	end
-
-	local function installAutoExec()
-		local queue = getQueueOnTeleport()
-		if not queue then
-			warn("[AutoExec] queue_on_teleport 未対応")
-			return false
-		end
-		pcall(function()
-			TeleportService:SetTeleportSetting("__ShouyuAutoLoad", true)
-		end)
-		if rawget(_G, "__ShouyuAutoQueued") == true then return true end
-
-		local ok = pcall(queue, [[
-local TS = game:GetService("TeleportService")
-local enabled = true
-pcall(function()
-    enabled = TS:GetTeleportSetting("__ShouyuAutoLoad") == true
-end)
-if enabled then
-    if not game:IsLoaded() then game.Loaded:Wait() end
-    pcall(function()
-        local p = game:GetService("Players").LocalPlayer
-        if p and not p.Character then p.CharacterAdded:Wait() end
-    end)
-    task.wait(1.5)
-    local ok, src = pcall(function()
-        return game:HttpGet("https://raw.githubusercontent.com/あなたのリポジトリ/main/shouyu.lua")
-    end)
-    if ok and type(src) == "string" then
-        local chunk = loadstring(src)
-        if chunk then chunk() end
-    end
-end
-]])
-
-		if ok then
-			_G.__ShouyuAutoQueued = true
-			print("[AutoExec] 登録完了")
-			return true
-		end
-		return false
-	end
-
-	installAutoExec()
-end
 
 -- 公開API
 _G.ShouyuHubMoon = {
@@ -1443,6 +1405,7 @@ _G.ShouyuHubMoon = {
 	Steal = function(uid, instant) stealAndDeliver(uid, instant == true) end,
 	Show = function() gui.Enabled = true end,
 	Hide = function() gui.Enabled = false end,
+	Speed = SPEED,
 }
 
 -- Shield 起動
@@ -1451,4 +1414,8 @@ shieldStart()
 -- 初回リスト構築
 rebuild()
 
-print("[SHOUYU HUB Moon] 起動完了")
+print("[SHOUYU HUB Moon] ★起動完了★")
+print("  サイズ: " .. W .. "x" .. H)
+print("  速度: " .. SPEED)
+print("  即盗みボタン → 選択卵を即スティール")
+print("  自動盗みボタン → 最高値卵を自動スティール")
