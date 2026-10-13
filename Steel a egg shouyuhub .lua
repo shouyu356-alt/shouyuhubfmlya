@@ -506,7 +506,7 @@ local function runToEgg(uid, egg)
 		local flat = Vector3.new(waypoint.X - r.Position.X, 0, waypoint.Z - r.Position.Z)
 		local unit = flat.Magnitude > 0.01 and flat.Unit or Vector3.zero
 		-- ★ 固定800
-		local v = unit * math.min(CFG.Speed, flat.Magnitude / 0.12)
+		local v = unit * math.min(CFG.Speed, flat.Magnitude / 0.25)
 		pcall(function()
 			r.AssemblyLinearVelocity = Vector3.new(v.X, r.AssemblyLinearVelocity.Y, v.Z)
 			if humanoid and unit.Magnitude > 0 then humanoid:Move(unit, false) end
