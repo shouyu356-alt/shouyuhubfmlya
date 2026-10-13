@@ -1220,4 +1220,366 @@ local body = make("Frame", {
 })
 body.Parent = window
 
--- Part 3C ここまで。「次」で Part 3D（リスト・ボタン・起動）へ。
+-- Part 3C ここまで。「次」で Part 3D（リスト・ボタン・起動）へ。-- ================================================================
+-- 追加専用: yslemEgg UI（既存UIには一切触りません）
+-- ハブの最後に貼るだけ
+-- ================================================================
+do
+	local Players = game:GetService("Players")
+	local RunService = game:GetService("RunService")
+	local ReplicatedStorage = game:GetService("ReplicatedStorage")
+	local UserInputService = game:GetService("UserInputService")
+	local CoreGui = game:GetService("CoreGui")
+	local localPlayer = Players.LocalPlayer
+
+	local function parentGui()
+		if typeof(gethui) == "function" then
+			local ok, r = pcall(gethui)
+			if ok and typeof(r) == "Instance" then return r end
+		end
+		return CoreGui
+	end
+	local function make(class, props)
+		local i = Instance.new(class)
+		for k, v in pairs(props or {}) do i[k] = v end
+		return i
+	end
+	local function corner(p, r) make("UICorner", { CornerRadius = UDim.new(0, r or 6) }).Parent = p end
+	local function bands(a, b)
+		return ColorSequence.new({
+			ColorSequenceKeypoint.new(0, a), ColorSequenceKeypoint.new(0.25, b),
+			ColorSequenceKeypoint.new(0.5, a), ColorSequenceKeypoint.new(0.75, b),
+			ColorSequenceKeypoint.new(1, a),
+		})
+	end
+
+	local WHITE  = Color3.fromRGB(230, 235, 245)
+	local SILVER = Color3.fromRGB(180, 190, 210)
+	local STEEL  = Color3.fromRGB(60, 70, 95)
+	local BG     = Color3.fromRGB(13, 17, 30)
+
+	-- 既に追加済みなら二重追加しない
+	local existing = parentGui():FindFirstChild("yslemEggAddon")
+	if existing then
+		-- 既にあればそのまま使う（消さない）
+		print("[yslemEgg Addon] 既に追加済み")
+		return
+	end
+
+	local living = {}
+	local function livingStroke(p, t, bright)
+		local s = make("UIStroke", { Thickness = t or 1, Color = WHITE, ApplyStrokeMode = Enum.ApplyStrokeMode.Border })
+		s.Parent = p
+		local g = make("UIGradient", { Rotation = 45, Color = bands(bright and WHITE or SILVER, STEEL) })
+		g.Parent = s
+		living[#living+1] = g
+		return s, g
+	end
+	local function livingText(l)
+		local g = make("UIGradient", { Color = bands(WHITE, SILVER) })
+		g.Parent = l
+		living[#living+1] = g
+		return g
+	end
+	local function text(p, props)
+		local alive = props.Living ~= false
+		props.Living = nil
+		props.BackgroundTransparency = 1
+		props.TextColor3 = props.TextColor3 or WHITE
+		local l = make("TextLabel", props)
+		l.Parent = p
+		if alive then livingText(l) end
+		return l
+	end
+
+	-- 追加専用のScreenGui（既存UIと別名）
+	local gui = make("ScreenGui", {
+		Name = "yslemEggAddon",
+		ResetOnSpawn = false,
+		ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+		IgnoreGuiInset = true,
+	})
+	gui.Parent = parentGui()
+
+	local W, H, HEADER = 180, 220, 22
+	local window = make("Frame", {
+		Size = UDim2.fromOffset(W, H),
+		Position = UDim2.new(0.5, -W/2, 0.5, -H/2),
+		BackgroundColor3 = BG, BorderSizePixel = 0,
+	})
+	window.Parent = gui
+	corner(window, 18)
+	livingStroke(window, 1, true)
+
+	local rot, tick = 0, 0
+	RunService.Heartbeat:Connect(function(dt)
+		tick += 1
+		if tick % 2 ~= 0 then return end
+		rot = (rot + dt * 72) % 360
+		for _, g in ipairs(living) do
+			if g.Parent then
+				g.Rotation = g.Parent:IsA("UIStroke") and (45 + rot) % 360 or rot
+			end
+		end
+	end)
+
+	local header = make("Frame", {
+		Size = UDim2.new(1, -8, 0, HEADER - 4),
+		Position = UDim2.fromOffset(4, 4),
+		BackgroundColor3 = WHITE, BorderSizePixel = 0,
+	})
+	header.Parent = window
+	corner(header, 10)
+	do
+		local g = make("UIGradient", { Color = bands(WHITE, SILVER) })
+		g.Parent = header
+		living[#living+1] = g
+	end
+	text(header, {
+		Size = UDim2.new(1, -50, 1, 0), Position = UDim2.fromOffset(8, 0),
+		Font = Enum.Font.GothamBlack, TextSize = 11,
+		TextColor3 = Color3.new(0,0,0),
+		TextXAlignment = Enum.TextXAlignment.Left,
+		Text = "yslemEgg", Living = false,
+	})
+
+	local function headerButton(label, off)
+		local b = make("TextButton", {
+			Size = UDim2.fromOffset(18, 15),
+			Position = UDim2.new(1, off, 0.5, -7),
+			BackgroundColor3 = BG, Font = Enum.Font.GothamBold,
+			TextSize = 11, TextColor3 = WHITE, Text = label,
+		})
+		b.Parent = header
+		corner(b, 7)
+		livingStroke(b, 1, true)
+		livingText(b)
+		return b
+	end
+	local minimizeBtn = headerButton("-", -40)
+	local closeBtn = headerButton("x", -20)
+
+	local body = make("Frame", {
+		Size = UDim2.new(1, -10, 1, -(HEADER + 8)),
+		Position = UDim2.fromOffset(5, HEADER + 4),
+		BackgroundTransparency = 1,
+	})
+	body.Parent = window
+
+	local list = make("ScrollingFrame", {
+		Size = UDim2.new(1, 0, 1, -58),
+		BackgroundColor3 = BG, BorderSizePixel = 0,
+		ScrollBarThickness = 2, ScrollBarImageColor3 = SILVER,
+		CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y,
+	})
+	list.Parent = body
+	corner(list, 12)
+	livingStroke(list, 1, false)
+	make("UIListLayout", { Padding = UDim.new(0, 3), SortOrder = Enum.SortOrder.LayoutOrder }).Parent = list
+	make("UIPadding", { PaddingTop = UDim.new(0, 5), PaddingBottom = UDim.new(0, 5), PaddingLeft = UDim.new(0, 5), PaddingRight = UDim.new(0, 6) }).Parent = list
+
+	local statusLabel = text(body, {
+		Size = UDim2.new(1, 0, 0, 12), Position = UDim2.new(0, 0, 1, -52),
+		Font = Enum.Font.Gotham, TextSize = 9,
+		TextXAlignment = Enum.TextXAlignment.Left,
+		TextTruncate = Enum.TextTruncate.AtEnd, Text = "Pick a pet",
+	})
+
+	local function bigButton(label, pos, size)
+		local b = make("TextButton", {
+			Size = size, Position = pos, BackgroundColor3 = BG,
+			Font = Enum.Font.GothamBlack, TextSize = 12, TextColor3 = WHITE,
+			Text = label,
+		})
+		b.Parent = body
+		corner(b, 17)
+		livingStroke(b, 1, true)
+		livingText(b)
+		return b
+	end
+	local refreshBtn = bigButton("Refresh", UDim2.new(0, 0, 1, -34), UDim2.new(0.4, -2, 0, 34))
+	local stealBtn   = bigButton("Steal",   UDim2.new(0.4, 2, 1, -34), UDim2.new(0.6, -2, 0, 34))
+
+	local networking = ReplicatedStorage:WaitForChild("Packages"):WaitForChild("Networking")
+	local Assets, Mutations
+	pcall(function() Assets = require(ReplicatedStorage.Data.Assets) end)
+	pcall(function() Mutations = require(ReplicatedStorage.Shared.Modules.Mutations) end)
+
+	local function snapshot()
+		local out = {}
+		local rf = networking:FindFirstChild("RF/EggWorld/AskFieldEggSnapshot")
+		if not rf or not rf:IsA("RemoteFunction") then return out end
+		local ok, result = pcall(rf.InvokeServer, rf)
+		local records = ok and type(result) == "table" and result.Records or nil
+		if type(records) ~= "table" then return out end
+		for _, r in pairs(records) do
+			if type(r) == "table" and type(r.Uid) == "string"
+				and (r.State == "Slot" or r.State == "Dropped")
+				and typeof(r.BottomCFrame) == "CFrame" then
+				out[#out+1] = r
+			end
+		end
+		return out
+	end
+
+	local function describe(r)
+		local dir = type(Assets) == "table" and Assets.Directory or nil
+		local e = type(dir) == "table" and dir[tostring(r.AssetCategory)] or nil
+		local info = { Uid = r.Uid, Name = tostring(r.AssetCategory), Icon = "", Value = 0 }
+		if type(e) == "table" then
+			info.Name = tostring(e.DisplayName or r.AssetCategory)
+			local icon = e.Icon
+			if icon ~= nil and tostring(icon) ~= "" then
+				icon = tostring(icon)
+				info.Icon = tonumber(icon) and ("rbxassetid://" .. icon) or icon
+			end
+			local scale = tonumber(r.AssetScale) or 1
+			local factor = scale > 5 and (scale / 5) ^ 1.2 * 19.637875755794113 or scale ^ 1.85
+			local m = 1
+			if type(Mutations) == "table" and type(Mutations.EarningsFor) == "function" then
+				local ok, res = pcall(Mutations.EarningsFor, type(r.Mutations) == "table" and r.Mutations or {})
+				if ok and type(res) == "number" then m = res end
+			end
+			info.Value = (tonumber(e.EarningRate) or 0) * factor * m
+		end
+		return info
+	end
+
+	local function money(v)
+		local u = { {1e12,"T"}, {1e9,"B"}, {1e6,"M"}, {1e3,"K"} }
+		for _, x in ipairs(u) do
+			if v >= x[1] then return string.format("$%.2f%s/s", v/x[1], x[2]) end
+		end
+		return string.format("$%d/s", math.floor(v+0.5))
+	end
+
+	local selectedUid = nil
+	local rows = {}
+
+	local function setSelected(uid)
+		selectedUid = uid
+		for rowUid, row in pairs(rows) do
+			local on = rowUid == uid
+			row.Stroke.Thickness = on and 1.5 or 1
+			row.Gradient.Color = on and bands(WHITE, STEEL) or bands(STEEL, Color3.fromRGB(30,30,34))
+		end
+	end
+
+	local function rebuild()
+		for _, row in pairs(rows) do row.Frame:Destroy() end
+		table.clear(rows)
+		for i = #living, 1, -1 do
+			if not living[i].Parent then table.remove(living, i) end
+		end
+		local infos = {}
+		for _, r in ipairs(snapshot()) do infos[#infos+1] = describe(r) end
+		table.sort(infos, function(a,b) return a.Value > b.Value end)
+
+		for i, info in ipairs(infos) do
+			local f = make("TextButton", {
+				Size = UDim2.new(1, 0, 0, 30),
+				BackgroundColor3 = BG, LayoutOrder = i, Text = "",
+			})
+			f.Parent = list
+			corner(f, 10)
+			local rs, rg = livingStroke(f, 1, false)
+			make("ImageLabel", {
+				Size = UDim2.fromOffset(24, 24),
+				Position = UDim2.fromOffset(3, 3),
+				BackgroundTransparency = 1,
+				Image = info.Icon,
+				ScaleType = Enum.ScaleType.Fit,
+			}).Parent = f
+			text(f, {
+				Size = UDim2.new(1, -32, 0, 14),
+				Position = UDim2.fromOffset(30, 2),
+				Font = Enum.Font.GothamBold, TextSize = 10,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				TextTruncate = Enum.TextTruncate.AtEnd,
+				Text = info.Name,
+			})
+			text(f, {
+				Size = UDim2.new(1, -32, 0, 12),
+				Position = UDim2.fromOffset(30, 16),
+				Font = Enum.Font.GothamMedium, TextSize = 9,
+				TextXAlignment = Enum.TextXAlignment.Left,
+				Text = money(info.Value),
+			})
+			rows[info.Uid] = { Frame = f, Stroke = rs, Gradient = rg }
+			f.MouseButton1Click:Connect(function()
+				setSelected(info.Uid)
+				statusLabel.Text = "Selected: " .. info.Name
+			end)
+		end
+		if #infos == 0 then statusLabel.Text = "No eggs on field" end
+	end
+
+	refreshBtn.MouseButton1Click:Connect(function()
+		rebuild(); statusLabel.Text = "Refreshed"
+	end)
+
+	stealBtn.MouseButton1Click:Connect(function()
+		if not selectedUid then
+			statusLabel.Text = "Pick a pet first"
+			return
+		end
+		statusLabel.Text = "Selected UID: " .. selectedUid
+		-- ここにスティール処理を後から追加
+	end)
+
+	-- ドラッグ
+	do
+		local dragging, startPos, startInput
+		header.InputBegan:Connect(function(input)
+			if input.UserInputType == Enum.UserInputType.MouseButton1
+				or input.UserInputType == Enum.UserInputType.Touch then
+				dragging, startPos, startInput = true, window.Position, input.Position
+				input.Changed:Connect(function()
+					if input.UserInputState == Enum.UserInputState.End then dragging = false end
+				end)
+			end
+		end)
+		UserInputService.InputChanged:Connect(function(input)
+			if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+				or input.UserInputType == Enum.UserInputType.Touch) then
+				local d = input.Position - startInput
+				window.Position = UDim2.new(
+					startPos.X.Scale, startPos.X.Offset + d.X,
+					startPos.Y.Scale, startPos.Y.Offset + d.Y)
+			end
+		end)
+	end
+
+	local minimized = false
+	minimizeBtn.MouseButton1Click:Connect(function()
+		minimized = not minimized
+		body.Visible = not minimized
+		window.Size = minimized and UDim2.fromOffset(W, HEADER + 4) or UDim2.fromOffset(W, H)
+	end)
+
+	closeBtn.MouseButton1Click:Connect(function()
+		-- ×を押してもハブ全体は消さず、このGUIだけ非表示
+		gui.Enabled = false
+	end)
+
+	-- 外部から叩けるよう公開（_G経由、既存の _G を壊さない）
+	_G.YSlemEggAddon = _G.YSlemEggAddon or {}
+	_G.YSlemEggAddon.Show = function() gui.Enabled = true end
+	_G.YSlemEggAddon.Hide = function() gui.Enabled = false end
+	_G.YSlemEggAddon.Rebuild = rebuild
+	_G.YSlemEggAddon.GetSelected = function() return selectedUid end
+	_G.YSlemEggAddon.SetStealCallback = function(cb)
+		stealBtn.MouseButton1Click:Connect(function() cb(selectedUid) end)
+	end
+	_G.YSlemEggAddon.SetStatus = function(s) statusLabel.Text = tostring(s) end
+
+	rebuild()
+	task.spawn(function()
+		while gui.Parent do
+			task.wait(4)
+			if gui.Enabled then pcall(rebuild) end
+		end
+	end)
+
+	print("[yslemEgg Addon] 追加完了（既存UIは無傷）")
+end
