@@ -1060,3 +1060,100 @@ task.spawn(function()
 end)
 
 print("[SHOUYU] 起動完了 / 移動速度 " .. MOVE_SPEED .. " / 帰宅速度 " .. HOME_SPEED)
+-- ============================================================
+-- Part 7 : 置いて拾い直しループ（検知対策）
+-- 卵を持ってる間、0.5秒おきにドロップ→再取得を繰り返す
+-- ============================================================
+task.spawn(function()
+    -- 家の座標
+    local function getHome()
+        for _, def in ipairs({
+            { { "GearGiver_Slap", "Podium" }, Vector3.new(-16.415, 21.072, -6.106) },
+            { { "World", "Machines", "RiftMachine", "Rift", "Meshes/VoidPortal_Cube.003" }, Vector3.new(-26.776, 1.75, 18.665) },
+            { { "__OBJECTS", "Machines", "RiftMachine", "Rift", "Meshes/VoidPortal_Cube.003" }, Vector3.new(-26.776, 1.75, 18.665) },
+        }) do
+            local n = workspace
+            for _, name in ipairs(def[1]) do
+                n = n and n:FindFirstChild(name) or nil
+            end
+            if n and n:IsA("BasePart") then
+                return n.CFrame:PointToWorldSpace(def[2])
+            end
+        end
+        return Vector3.new(528.7, 70.57, -364.11)
+    end
+
+    local function getRoot()
+        local c = localPlayer.Character
+        return c and c:FindFirstChild("HumanoidRootPart")
+    end
+
+    local function takeEgg(uid)
+        if type(uid) ~= "string" then return end
+        local ok = pcall(function()
+            local EggState = require(ReplicatedStorage.Client.EggState)
+            if type(EggState) == "table" and type(EggState.CarryFieldEgg) == "function" then
+                EggState.CarryFieldEgg(uid)
+            end
+        end)
+    end
+
+    local function dropEgg()
+        pcall(function()
+            local EggState = require(ReplicatedStorage.Client.EggState)
+            if type(EggState) == "table" and type(EggState.DropFieldEgg) == "function" then
+                EggState.DropFieldEgg("PlayerRequest")
+            end
+        end)
+    end
+
+    -- 状態
+    local lastCarry = false
+    local placeCycleAt = 0
+
+    while true do
+        task.wait(0.1)
+
+        -- Part 2 の state を参照
+        if type(state) ~= "table" then
+            task.wait(1)
+            continue
+        end
+
+        -- 卵を持ち始めた
+        if state.Carrying and not lastCarry then
+            placeCycleAt = os.clock() + 0.5
+            lastCarry = true
+        end
+        -- 卵を離した
+        if not state.Carrying and lastCarry then
+            lastCarry = false
+        end
+
+        -- 卵を持ってる間だけ 0.5秒おきにループ
+        if state.Carrying and state.Uid and os.clock() >= placeCycleAt then
+            placeCycleAt = os.clock() + 0.5
+
+            local r = getRoot()
+            if r then
+                local home = getHome()
+                local distHome = (r.Position - home).Magnitude
+                -- 家に近づいたら止める（納品直前を邪魔しない）
+                if distHome > 15 then
+                    -- ドロップ
+                    dropEgg()
+                    -- 0.08秒待つ
+                    task.wait(0.08)
+                    -- 再取得
+                    if state.Uid then
+                        takeEgg(state.Uid)
+                    end
+                end
+            end
+        end
+    end
+end)
+
+print("[SEC] ★ 置いて拾い直しループ 起動 ★")
+print("  卵を持ってる間、0.5秒おきにドロップ→再取得")
+print("  家まで15 studs以内になったら停止（納品を邪魔しない）")
