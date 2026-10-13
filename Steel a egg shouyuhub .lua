@@ -820,123 +820,115 @@ local function runHome(lineX, laneZ)
 end
 
 print("[SHOUYU] Part3 OK")-- ============================================================
--- Part 4/6 : Instant TP + stealAndDeliver
+-- ============================================================
+-- Part 4/6 (差し替え) : 移動配送 + stealAndDeliver
+-- Instant TPをやめて、実際に飛んで家まで移動する
 -- ============================================================
 
-local function instantTP(uid)
+-- ★ 家まで飛んで移動（テレポートなし、速度3500）
+local function flyHome(uid, lineX, laneZ)
     local started = os.clock()
-    local lineX, lineY = lineInfo()
+    local home = homePoint()
     local r = root()
     if not r then return false end
-    local laneZ = math.clamp(r.Position.Z, -425, -300)
-    local landing = Vector3.new(lineX + CFG.LandOffset, lineY + 3.35, laneZ)
 
-    local hopStep = math.max(walkSpeed() * CFG.HopRatio, CFG.HopMin)
-    local hopY = r.Position.Y + CFG.HopLift
-    local x = r.Position.X
-    local retries = 0
-    local releaseCamera = frozenCamera()
-    state.ReleaseCamera = releaseCamera
-    pcall(postClone)
-    fpsOn()
+    local character = localPlayer.Character
+    local humanoid = character and character:FindFirstChildOfClass("Humanoid")
+    if humanoid then humanoid.PlatformStand = true end
 
-    while x - hopStep > landing.X and not state.Cancel do
-        if not state.Carrying then
-            if not regrab(uid) then break end
-            local current = root()
-            if current then x = math.min(x, current.Position.X) end
-            continue
+    local speed = CFG.RunSpeed  -- 3500
+
+    -- =========================================================
+    -- Step 1: 上空へ上昇
+    -- =========================================================
+    local startPos = r.Position
+    local highY = math.max(startPos.Y, home.Y) + CFG.Height
+    local t1 = os.clock()
+    while os.clock() - t1 < 10 and not state.Cancel do
+        if not state.Carrying and state.Delivered < started then
+            if humanoid then humanoid.PlatformStand = false end
+            return false
         end
-        local nextX = x - hopStep
-        status(string.format("Instant TP: hopping home, X %d", math.floor(nextX)))
-        local pulledBefore = state.PulledAt
-        local held = 0
-        while held < CFG.HopGap do
-            place(Vector3.new(nextX, hopY, laneZ))
-            held += RunService.Heartbeat:Wait()
-        end
-        local check = root()
-        local pulled = state.PulledAt > pulledBefore
-            or (check ~= nil and (check.Position.X - nextX > 10
-                or check.AssemblyLinearVelocity.Magnitude > 150))
-        if pulled and state.Carrying and not state.Cancel then
-            retries += 1
-            CFG.HopGap = math.min(CFG.HopGapMax, CFG.HopGap + 0.02)
-            if retries > CFG.HopRetries then break end
-            status(string.format("Instant TP: pulled back, retry %d/%d", retries, CFG.HopRetries))
-            local settle = 0
-            while settle < 0.12 and not state.Cancel do
-                place(Vector3.new(x, hopY, laneZ))
-                settle += RunService.Heartbeat:Wait()
-            end
-        else
-            x = nextX
-            CFG.HopGap = math.max(CFG.HopGapMin, CFG.HopGap - 0.01)
-        end
+        r = root()
+        if not r then return false end
+        local d = Vector3.new(0, highY - r.Position.Y, 0)
+        if d.Magnitude < 3 then break end
+        local v = d.Unit * math.min(speed, d.Magnitude / 0.05)
+        pcall(function()
+            r.AssemblyLinearVelocity = v
+            r.AssemblyAngularVelocity = Vector3.zero
+        end)
+        RunService.Heartbeat:Wait()
     end
 
-    status("Instant TP: landing next to the line")
-    landing = Vector3.new(landing.X, groundY(landing, landing.Y), landing.Z)
-    local function land()
-        local current = root()
-        if current and current.Position.X <= landing.X + 1 and current.Position.Y > landing.Y - 25 then
-            pcall(function() current.AssemblyLinearVelocity = Vector3.zero end)
-            return
+    -- =========================================================
+    -- Step 2: 家の上空へ水平移動
+    -- =========================================================
+    local t2 = os.clock()
+    while os.clock() - t2 < 15 and not state.Cancel do
+        if not state.Carrying and state.Delivered < started then
+            if humanoid then humanoid.PlatformStand = false end
+            return false
         end
-        place(landing)
+        r = root()
+        if not r then return false end
+        local flat = Vector3.new(home.X - r.Position.X, 0, home.Z - r.Position.Z)
+        if flat.Magnitude < 6 then break end
+        local v = flat.Unit * math.min(speed, flat.Magnitude / 0.05)
+        pcall(function()
+            r.AssemblyLinearVelocity = Vector3.new(v.X, 0, v.Z)
+            r.AssemblyAngularVelocity = Vector3.zero
+        end)
+        RunService.Heartbeat:Wait()
     end
-    land()
-    for attempt = 1, 3 do
-        local settle = 0
-        while settle < CFG.LandSettle and not state.Cancel do
-            settle += RunService.Heartbeat:Wait()
-        end
-        local landed = root()
-        if state.Carrying and landed
-            and (landed.Position.X - landing.X > 12 or landed.Position.Y < landing.Y - 25) then
-            status("Instant TP: landing retry " .. attempt)
-            land()
-        else
-            break
-        end
-    end
-    dropClone()
 
-    if state.Carrying and not state.Cancel then
-        local delay = 0
-        while delay < CFG.DropDelay do
-            delay += RunService.Heartbeat:Wait()
+    -- =========================================================
+    -- Step 3: 家へ降下（ここでドロップ）
+    -- =========================================================
+    local t3 = os.clock()
+    while os.clock() - t3 < 15 and not state.Cancel do
+        if not state.Carrying and state.Delivered < started then
+            if humanoid then humanoid.PlatformStand = false end
+            return false
         end
-        status("Instant TP: dropping the egg")
+        r = root()
+        if not r then return false end
+        local d = home - r.Position
+        if d.Magnitude < 5 then break end
+        local v = d.Unit * math.min(speed, d.Magnitude / 0.05)
+        pcall(function()
+            r.AssemblyLinearVelocity = v
+            r.AssemblyAngularVelocity = Vector3.zero
+        end)
+        RunService.Heartbeat:Wait()
+    end
+
+    -- 停止
+    if r then
+        pcall(function()
+            r.AssemblyLinearVelocity = Vector3.zero
+            r.AssemblyAngularVelocity = Vector3.zero
+        end)
+    end
+
+    if humanoid then humanoid.PlatformStand = false end
+    task.wait(0.2)
+
+    if state.Carrying then
+        status("Dropping the egg")
         dropEgg()
         local waited = 0
         while state.Carrying and waited < 1 and not state.Cancel do
             waited += RunService.Heartbeat:Wait()
         end
-        local current = root()
-        if current then
-            pcall(function()
-                current.AssemblyLinearVelocity = Vector3.zero
-                current.AssemblyAngularVelocity = Vector3.zero
-            end)
-        end
-        releaseCamera()
-        dropClone()
-        status("Instant TP: taking the egg back")
-        if not grab(uid, 3) and not regrab(uid) then
-            fpsOff()
-            status("Could not take the egg back")
-            return false
-        end
-        dropClone()
     end
-    releaseCamera()
-    local ok = false
-    if state.Carrying then ok = runHome(lineX, laneZ) end
-    fpsOff()
-    return ok or state.Delivered >= started
+
+    return state.Delivered >= started or not state.Carrying
 end
 
+-- ============================================================
+-- stealAndDeliver（移動配送版）
+-- ============================================================
 local function stealAndDeliver(uid)
     if state.Busy then return end
     state.Busy = true
@@ -956,34 +948,41 @@ local function stealAndDeliver(uid)
                     waited += RunService.Heartbeat:Wait()
                 end
             end
+
             fpsOn()
+
             status("Going to the egg")
             if not runToEgg(uid, egg) then
                 fpsOff()
                 status("Could not reach the egg")
                 return
             end
+
             status("Taking the egg")
             if not grab(uid, 4) then
                 fpsOff()
                 status("The egg would not come free")
                 return
             end
-            local delivered = instantTP(uid)
+
+            status("Flying home")
+            local lineX, lineY = lineInfo()
+            local r = root()
+            local laneZ = r and math.clamp(r.Position.Z, -425, -300) or -360
+            local delivered = flyHome(uid, lineX, laneZ)
+
             status(delivered and "Delivered" or "Delivery failed")
         end)
         fpsOff()
         dropClone()
-        if state.ReleaseCamera then
-            pcall(state.ReleaseCamera)
-            state.ReleaseCamera = nil
+        if not ok then
+            status("Error: " .. tostring(err))
         end
-        if not ok then status("Error: " .. tostring(err)) end
         state.Busy = false
     end)
 end
 
-print("[SHOUYU] Part4 OK")-- ============================================================
+print("[SHOUYU] Part4(移動配送) OK")
 -- Part 5/6 : SHOUYU UI 前半
 -- ============================================================
 local function parentGui()
