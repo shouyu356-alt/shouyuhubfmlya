@@ -950,9 +950,8 @@ end
 
 print("[SHOUYU] Part4 OK")-- ================================================================
 -- ================================================================
--- Part 5/7 (修正版) : UI本体（中サイズ 240x460）
+-- Part 5 : UI本体
 -- ================================================================
-
 local prev = parentGui():FindFirstChild("ShouyuHubMoon")
 if prev then prev:Destroy() end
 
@@ -965,7 +964,6 @@ local gui = make("ScreenGui", {
 })
 gui.Parent = parentGui()
 
--- ★ 中サイズ
 local W, H = 240, 460
 local HEADER_H = 70
 
@@ -995,7 +993,7 @@ do
 	end)
 end
 
------------------------------------------------------------------- ヘッダー
+-- ヘッダー
 local header = make("Frame", {
 	Name = "Header",
 	Size = UDim2.new(1, 0, 0, HEADER_H),
@@ -1022,16 +1020,7 @@ local logoFrame = make("Frame", {
 })
 logoFrame.Parent = header
 corner(logoFrame, logoSize / 2)
-make("Frame", {
-	Size = UDim2.fromOffset(logoSize - 9, logoSize - 9),
-	Position = UDim2.fromOffset(11, -2),
-	BackgroundColor3 = MOON_CARD,
-	BorderSizePixel = 0,
-	Parent = logoFrame,
-}):FindFirstChild("") -- ダミー
-corner(logoFrame:FindFirstChildWhichIsA("Frame") or logoFrame, (logoSize - 9) / 2)
 
--- ↑上のミニテクはやめて普通に書く
 local moonShadow = make("Frame", {
 	Size = UDim2.fromOffset(logoSize - 10, logoSize - 10),
 	Position = UDim2.fromOffset(12, -2),
@@ -1062,9 +1051,7 @@ txt(header, {
 	Living = false,
 })
 
--- 最小化ボタン
 local minBtn = make("TextButton", {
-	Name = "MinBtn",
 	Size = UDim2.fromOffset(30, 30),
 	Position = UDim2.new(1, -74, 0, 20),
 	BackgroundColor3 = MOON_CARD2,
@@ -1074,14 +1061,13 @@ local minBtn = make("TextButton", {
 	Text = "-",
 	AutoButtonColor = false,
 	BorderSizePixel = 0,
+	ZIndex = 5,
 })
 minBtn.Parent = header
 corner(minBtn, 7)
 livingStroke(minBtn, 1, false)
 
--- 閉じるボタン
 local closeBtn = make("TextButton", {
-	Name = "CloseBtn",
 	Size = UDim2.fromOffset(30, 30),
 	Position = UDim2.new(1, -40, 0, 20),
 	BackgroundColor3 = MOON_RED,
@@ -1091,12 +1077,14 @@ local closeBtn = make("TextButton", {
 	Text = "X",
 	AutoButtonColor = false,
 	BorderSizePixel = 0,
+	ZIndex = 5,
 })
 closeBtn.Parent = header
 corner(closeBtn, 7)
 
------------------------------------------------------------------- ステータス行
+-- ステータス行
 local statusRow = make("Frame", {
+	Name = "StatusRow",
 	Size = UDim2.new(1, -16, 0, 26),
 	Position = UDim2.fromOffset(8, HEADER_H + 8),
 	BackgroundTransparency = 1,
@@ -1136,7 +1124,7 @@ autoUpdateBtn.MouseButton1Click:Connect(function()
 	autoUpdateBtn.TextColor3 = autoUpdateOn and MOON_GREEN or MOON_SUB
 end)
 
------------------------------------------------------------------- 卵リスト
+-- 卵リスト
 local BOTTOM_BTN_H = 44
 local listTop = HEADER_H + 8 + 26 + 8
 local listH = H - listTop - BOTTOM_BTN_H - 16
@@ -1271,32 +1259,33 @@ local function rebuild()
 	statusLabel.Text = string.format("%d 個の卵を検出", #infos)
 end
 
-print("[SHOUYU] Part5 (中サイズ) OK")
--- Part 6/7 : ボタン + ロジック接続（★ここが動く鍵）
+print("[SHOUYU] Part5 OK (240x460)")
 -- ================================================================
-
+-- Part 6 : ボタン + 開け閉め
+-- ================================================================
 local btnRow = make("Frame", {
-	Size = UDim2.new(1, -24, 0, 48),
-	Position = UDim2.new(0, 12, 1, -60),
+	Name = "BtnRow",
+	Size = UDim2.new(1, -16, 0, 36),
+	Position = UDim2.new(0, 8, 1, -44),
 	BackgroundTransparency = 1,
 })
 btnRow.Parent = window
 
 local function bottomButton(label, posX, sizeX, bg, textColor)
 	local b = make("TextButton", {
-		Size = UDim2.new(sizeX, -6, 1, 0),
-		Position = UDim2.new(posX, 6, 0, 0),
+		Size = UDim2.new(sizeX, -4, 1, 0),
+		Position = UDim2.new(posX, 4, 0, 0),
 		BackgroundColor3 = bg,
 		Font = Enum.Font.GothamBold,
-		TextSize = 14,
+		TextSize = 11,
 		TextColor3 = textColor,
 		Text = label,
 		AutoButtonColor = false,
 		BorderSizePixel = 0,
 	})
 	b.Parent = btnRow
-	corner(b, 10)
-	livingStroke(b, 1.5, true)
+	corner(b, 8)
+	livingStroke(b, 1, true)
 	return b
 end
 
@@ -1304,7 +1293,6 @@ local refreshBtn = bottomButton("更新", 0, 0.34, MOON_CARD2, MOON_TEXT)
 local autoBtn = bottomButton("自動盗み", 0.34, 0.33, MOON_CARD2, MOON_TEXT)
 local instantBtn = bottomButton("即盗み", 0.67, 0.33, MOON_ACCENT, MOON_BG)
 
------------------------------------------------------------------- 更新ボタン
 refreshBtn.MouseButton1Click:Connect(function()
 	if state.Busy then
 		statusLabel.Text = "実行中は更新できません"
@@ -1314,7 +1302,6 @@ refreshBtn.MouseButton1Click:Connect(function()
 	statusLabel.Text = "更新しました"
 end)
 
------------------------------------------------------------------- 自動盗みボタン
 local autoRunning = false
 autoBtn.MouseButton1Click:Connect(function()
 	if autoRunning then
@@ -1326,31 +1313,25 @@ autoBtn.MouseButton1Click:Connect(function()
 		statusLabel.Text = "自動盗み 停止"
 		return
 	end
-
 	autoRunning = true
 	autoBtn.Text = "自動盗み ON"
 	autoBtn.BackgroundColor3 = MOON_GREEN
 	autoBtn.TextColor3 = MOON_BG
 	statusLabel.Text = "自動盗み 開始"
-
 	task.spawn(function()
 		while autoRunning do
-			if not state.Busy and not state.Carrying and not state.Cancel then
-				-- 一番価値の高い卵を探す
+			if not state.Busy and not state.Carrying then
 				local infos = {}
 				for _, r in ipairs(snapshot()) do infos[#infos+1] = describe(r) end
 				table.sort(infos, function(a, b) return a.Value > b.Value end)
 				local best = infos[1]
-				if best then
-					stealAndDeliver(best.Uid, false)
-				end
+				if best then stealAndDeliver(best.Uid, false) end
 			end
 			task.wait(1.5)
 		end
 	end)
 end)
 
------------------------------------------------------------------- 即盗みボタン
 instantBtn.MouseButton1Click:Connect(function()
 	if not selectedUid then
 		statusLabel.Text = "先に卵を選んでください"
@@ -1360,11 +1341,47 @@ instantBtn.MouseButton1Click:Connect(function()
 		statusLabel.Text = "実行中です"
 		return
 	end
-	-- ★ 直接ロジック呼び出し
 	stealAndDeliver(selectedUid, true)
 end)
 
------------------------------------------------------------------- ドラッグ
+-- 開け閉め
+local minimized = false
+local function setMinimized(v)
+	minimized = v
+	if minimized then
+		window.Size = UDim2.fromOffset(W, HEADER_H)
+		statusRow.Visible = false
+		list.Visible = false
+		btnRow.Visible = false
+		minBtn.Text = "+"
+	else
+		window.Size = UDim2.fromOffset(W, H)
+		statusRow.Visible = true
+		list.Visible = true
+		btnRow.Visible = true
+		minBtn.Text = "-"
+	end
+end
+
+minBtn.MouseButton1Click:Connect(function()
+	setMinimized(not minimized)
+end)
+
+-- ヘッダーをタップでも開け閉め（min/closeボタン以外）
+local headerHit = make("TextButton", {
+	Size = UDim2.new(1, -80, 1, 0),
+	Position = UDim2.fromOffset(0, 0),
+	BackgroundTransparency = 1,
+	Text = "",
+	AutoButtonColor = false,
+	ZIndex = 1,
+})
+headerHit.Parent = header
+headerHit.MouseButton1Click:Connect(function()
+	setMinimized(not minimized)
+end)
+
+-- ドラッグ
 do
 	local dragging, startPos, startInput
 	header.InputBegan:Connect(function(input)
@@ -1388,20 +1405,13 @@ do
 	end)
 end
 
------------------------------------------------------------------- 最小化・閉じる
-local minimized = false
-minBtn.MouseButton1Click:Connect(function()
-	minimized = not minimized
-	window.Size = minimized and UDim2.fromOffset(W, HEADER_H) or UDim2.fromOffset(W, H)
-end)
-
 closeBtn.MouseButton1Click:Connect(function()
 	autoRunning = false
 	state.Cancel = true
 	gui.Enabled = false
 end)
 
-print("[SHOUYU] Part6 OK")-- ================================================================
+print("[SHOUYU] Part6 OK")
 -- Part 7/7 : 起動
 -- ================================================================
 
