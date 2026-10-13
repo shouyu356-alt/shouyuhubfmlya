@@ -506,7 +506,7 @@ local function runToEgg(uid, egg)
 		local flat = Vector3.new(waypoint.X - r.Position.X, 0, waypoint.Z - r.Position.Z)
 		local unit = flat.Magnitude > 0.01 and flat.Unit or Vector3.zero
 		-- ★ 固定800
-		local v = unit * math.min(CFG.Speed, flat.Magnitude / 0.05)
+		local v = unit * math.min(CFG.Speed, flat.Magnitude / 0.12)
 		pcall(function()
 			r.AssemblyLinearVelocity = Vector3.new(v.X, r.AssemblyLinearVelocity.Y, v.Z)
 			if humanoid and unit.Magnitude > 0 then humanoid:Move(unit, false) end
@@ -549,7 +549,7 @@ local function grab(uid, timeout)
 			local delta = egg - r.Position
 			if delta.Magnitude > 2 then
 				-- ★ 固定800
-				local v = delta / math.max(0.08, dt)
+				local v = delta / math.max(0.05, dt)
 				if v.Magnitude > CFG.Speed then v = v.Unit * CFG.Speed end
 				pcall(function()
 					r.AssemblyLinearVelocity = v + Vector3.new(0, workspace.Gravity * dt * 0.5, 0)
