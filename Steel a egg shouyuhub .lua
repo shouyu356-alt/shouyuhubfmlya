@@ -821,3 +821,401 @@ _G.SHOUYU_STEAL = stealAndDeliver
 _G.SHOUYU_DATA = { Snapshot=snapshot, Describe=describe, Money=money, State=state }
 
 print("[SHOUYU] Part8 OK - ロジック完成")
+-- UI Part 1/3
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local localPlayer = Players.LocalPlayer
+
+print("[UI] 開始")
+
+local function allRoots()
+    local list = { game:GetService("CoreGui") }
+    if typeof(gethui) == "function" then
+        local ok, hui = pcall(gethui)
+        if ok and typeof(hui) == "Instance" then table.insert(list, hui) end
+    end
+    local pg = localPlayer:FindFirstChildOfClass("PlayerGui")
+    if pg then table.insert(list, pg) end
+    return list
+end
+
+for _, r in ipairs(allRoots()) do
+    for _, c in ipairs(r:GetChildren()) do
+        if c.Name == "ShouyuStealUI" then
+            pcall(function() c:Destroy() end)
+        end
+    end
+end
+
+local gui = Instance.new("ScreenGui")
+gui.Name = "ShouyuStealUI"
+gui.ResetOnSpawn = false
+gui.IgnoreGuiInset = true
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+gui.DisplayOrder = 2147483647
+
+local placed = false
+for _, r in ipairs(allRoots()) do
+    local ok = pcall(function() gui.Parent = r end)
+    if ok and gui.Parent then
+        placed = true
+        print("[UI] 親: " .. r:GetFullName())
+        break
+    end
+end
+if not placed then
+    warn("[UI] 親に配置できません")
+    return
+end
+
+local T = {
+    Bg = Color3.fromRGB(13, 10, 14),
+    Panel = Color3.fromRGB(24, 16, 22),
+    Card = Color3.fromRGB(28, 18, 24),
+    Deep = Color3.fromRGB(80, 20, 30),
+    Accent = Color3.fromRGB(255, 90, 90),
+    Soft = Color3.fromRGB(255, 170, 170),
+    Text = Color3.fromRGB(240, 230, 235),
+    Dim = Color3.fromRGB(160, 140, 150),
+}
+
+local function mk(cls, props)
+    local i = Instance.new(cls)
+    for k, v in pairs(props or {}) do i[k] = v end
+    return i
+end
+
+local function corner(p, r)
+    local c = Instance.new("UICorner")
+    c.CornerRadius = UDim.new(0, r or 8)
+    c.Parent = p
+end
+
+local W, H = 300, 420
+local win = mk("Frame", {
+    Name = "Window",
+    Size = UDim2.fromOffset(W, H),
+    Position = UDim2.new(0.5, -W/2, 0.5, -H/2),
+    BackgroundColor3 = T.Bg,
+    BorderSizePixel = 0,
+    ClipsDescendants = true,
+})
+win.Parent = gui
+corner(win, 14)
+
+local ws = mk("UIStroke", { Thickness = 2, Color = T.Accent, ApplyStrokeMode = Enum.ApplyStrokeMode.Border })
+ws.Parent = win
+
+local header = mk("Frame", {
+    Name = "Header",
+    Size = UDim2.new(1, -10, 0, 52),
+    Position = UDim2.fromOffset(5, 5),
+    BackgroundColor3 = T.Panel,
+    BorderSizePixel = 0,
+})
+header.Parent = win
+corner(header, 10)
+
+local avBox = mk("Frame", { Size = UDim2.fromOffset(38, 38), Position = UDim2.fromOffset(7, 7), BackgroundColor3 = T.Deep, BorderSizePixel = 0 })
+avBox.Parent = header
+corner(avBox, 19)
+
+local avImg = mk("ImageLabel", {
+    Size = UDim2.fromScale(0.88, 0.88), Position = UDim2.fromScale(0.06, 0.06),
+    BackgroundTransparency = 1,
+    Image = "rbxthumb://type=AvatarHeadShot&id=" .. localPlayer.UserId .. "&w=150&h=150",
+})
+avImg.Parent = avBox
+corner(avImg, 19)
+
+mk("TextLabel", {
+    Size = UDim2.new(1, -100, 0, 20), Position = UDim2.fromOffset(52, 6),
+    BackgroundTransparency = 1, Font = Enum.Font.GothamBlack, TextSize = 15,
+    TextXAlignment = Enum.TextXAlignment.Left, Text = "SHOUYU HUB", TextColor3 = T.Soft,
+    Parent = header,
+})
+
+mk("TextLabel", {
+    Size = UDim2.new(1, -100, 0, 14), Position = UDim2.fromOffset(52, 28),
+    BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = 10,
+    TextXAlignment = Enum.TextXAlignment.Left, Text = "STEAL AN EGG", TextColor3 = T.Dim,
+    Parent = header,
+})
+
+local minBtn = mk("TextButton", {
+    Size = UDim2.fromOffset(28, 28), Position = UDim2.new(1, -66, 0.5, -14),
+    BackgroundColor3 = T.Deep, Font = Enum.Font.GothamBold, TextSize = 18,
+    TextColor3 = T.Soft, Text = "-", AutoButtonColor = false, BorderSizePixel = 0,
+})
+minBtn.Parent = header
+corner(minBtn, 7)
+
+local closeBtn = mk("TextButton", {
+    Size = UDim2.fromOffset(28, 28), Position = UDim2.new(1, -34, 0.5, -14),
+    BackgroundColor3 = T.Deep, Font = Enum.Font.GothamBold, TextSize = 16,
+    TextColor3 = T.Soft, Text = "X", AutoButtonColor = false, BorderSizePixel = 0,
+})
+closeBtn.Parent = header
+corner(closeBtn, 7)
+
+print("[UI] Part1 OK")-- UI Part 2/3
+local body = mk("Frame", {
+    Size = UDim2.new(1, -10, 1, -67), Position = UDim2.fromOffset(5, 62),
+    BackgroundTransparency = 1,
+})
+body.Parent = win
+
+local statusL = mk("TextLabel", {
+    Size = UDim2.new(1, 0, 0, 16), Position = UDim2.fromOffset(2, 0),
+    BackgroundTransparency = 1, Font = Enum.Font.Gotham, TextSize = 10,
+    TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
+    Text = "Pick a pet", TextColor3 = T.Dim,
+})
+statusL.Parent = body
+
+local list = mk("ScrollingFrame", {
+    Size = UDim2.new(1, 0, 1, -76), Position = UDim2.fromOffset(0, 20),
+    BackgroundColor3 = T.Panel, BackgroundTransparency = 0.15, BorderSizePixel = 0,
+    ScrollBarThickness = 4, ScrollBarImageColor3 = T.Accent,
+    CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y,
+})
+list.Parent = body
+corner(list, 10)
+
+local layout = Instance.new("UIListLayout")
+layout.Padding = UDim.new(0, 4)
+layout.SortOrder = Enum.SortOrder.LayoutOrder
+layout.Parent = list
+
+local pad = Instance.new("UIPadding")
+pad.PaddingTop = UDim.new(0, 5)
+pad.PaddingBottom = UDim.new(0, 5)
+pad.PaddingLeft = UDim.new(0, 5)
+pad.PaddingRight = UDim.new(0, 6)
+pad.Parent = list
+
+local refreshBtn = mk("TextButton", {
+    Size = UDim2.new(0.4, -3, 0, 38), Position = UDim2.new(0, 0, 1, -44),
+    BackgroundColor3 = T.Card, Font = Enum.Font.GothamBold, TextSize = 13,
+    TextColor3 = T.Text, Text = "更新", AutoButtonColor = false, BorderSizePixel = 0,
+})
+refreshBtn.Parent = body
+corner(refreshBtn, 10)
+
+local stealBtn = mk("TextButton", {
+    Size = UDim2.new(0.6, -3, 0, 38), Position = UDim2.new(0.4, 3, 1, -44),
+    BackgroundColor3 = T.Deep, Font = Enum.Font.GothamBold, TextSize = 13,
+    TextColor3 = T.Text, Text = "Steal", AutoButtonColor = false, BorderSizePixel = 0,
+})
+stealBtn.Parent = body
+corner(stealBtn, 10)
+
+-- ドラッグ
+do
+    local dragging = false
+    local startPos = nil
+    local startInput = nil
+    header.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1
+            or input.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            startPos = win.Position
+            startInput = input.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then dragging = false end
+            end)
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
+            or input.UserInputType == Enum.UserInputType.Touch) then
+            local d = input.Position - startInput
+            win.Position = UDim2.new(
+                startPos.X.Scale, startPos.X.Offset + d.X,
+                startPos.Y.Scale, startPos.Y.Offset + d.Y)
+        end
+    end)
+end
+
+local minimized = false
+minBtn.MouseButton1Click:Connect(function()
+    minimized = not minimized
+    body.Visible = not minimized
+    win.Size = minimized and UDim2.fromOffset(W, 60) or UDim2.fromOffset(W, H)
+    minBtn.Text = minimized and "+" or "-"
+end)
+
+closeBtn.MouseButton1Click:Connect(function()
+    gui:Destroy()
+end)
+
+_G.SHOUYU_UI = {
+    Gui = gui, Win = win, Body = body, List = list,
+    Status = statusL, RefreshBtn = refreshBtn, StealBtn = stealBtn,
+    T = T, Mk = mk, Corner = corner,
+    SetStatus = function(s) statusL.Text = tostring(s) end,
+}
+
+print("[UI] Part2 OK")-- UI Part 3/3
+local DATA = _G.SHOUYU_DATA
+local STEAL = _G.SHOUYU_STEAL
+local UI = _G.SHOUYU_UI
+
+if not DATA then
+    warn("[UI] ロジック(_G.SHOUYU_DATA)が見つかりません")
+    return
+end
+if not STEAL then
+    warn("[UI] Steal関数(_G.SHOUYU_STEAL)が見つかりません")
+    return
+end
+
+local T = UI.T
+local mk = UI.Mk
+local corner = UI.Corner
+local list = UI.List
+local statusL = UI.Status
+local state = DATA.State
+
+local RARITY = {
+    Color3.fromRGB(190,190,190), Color3.fromRGB(110,210,110),
+    Color3.fromRGB(90,160,255), Color3.fromRGB(190,110,255),
+    Color3.fromRGB(255,170,50), Color3.fromRGB(255,80,80),
+    Color3.fromRGB(255,90,200), Color3.fromRGB(80,235,235),
+}
+
+local selectedUid = nil
+local rows = {}
+
+local function setSel(uid)
+    selectedUid = uid
+    for ru, row in pairs(rows) do
+        local on = ru == uid
+        row.Stroke.Thickness = on and 2 or 1
+        row.Stroke.Color = on and T.Accent or Color3.fromRGB(120,40,50)
+        row.Frame.BackgroundColor3 = on and T.Deep or T.Card
+    end
+end
+
+local function rebuild()
+    for _, row in pairs(rows) do
+        pcall(function() row.Frame:Destroy() end)
+    end
+    table.clear(rows)
+
+    local infos = {}
+    for _, r in ipairs(DATA.Snapshot()) do
+        local ok, info = pcall(DATA.Describe, r)
+        if ok and info then infos[#infos + 1] = info end
+    end
+    table.sort(infos, function(a, b) return (a.Value or 0) > (b.Value or 0) end)
+
+    local still = false
+    for i, info in ipairs(infos) do
+        still = still or info.Uid == selectedUid
+        local f = mk("TextButton", {
+            Size = UDim2.new(1, 0, 0, 44),
+            BackgroundColor3 = T.Card,
+            LayoutOrder = i,
+            Text = "",
+            AutoButtonColor = false,
+            BorderSizePixel = 0,
+        })
+        f.Parent = list
+        corner(f, 8)
+
+        local fs = mk("UIStroke", {
+            Thickness = 1,
+            Color = Color3.fromRGB(120,40,50),
+            ApplyStrokeMode = Enum.ApplyStrokeMode.Border,
+        })
+        fs.Parent = f
+
+        mk("ImageLabel", {
+            Size = UDim2.fromOffset(34, 34),
+            Position = UDim2.fromOffset(5, 5),
+            BackgroundTransparency = 1,
+            Image = info.Icon or "",
+            ScaleType = Enum.ScaleType.Fit,
+        }).Parent = f
+
+        mk("TextLabel", {
+            Size = UDim2.new(1, -48, 0, 18),
+            Position = UDim2.fromOffset(44, 4),
+            BackgroundTransparency = 1,
+            Font = Enum.Font.GothamBold,
+            TextSize = 12,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            TextTruncate = Enum.TextTruncate.AtEnd,
+            Text = info.Name or "?",
+            TextColor3 = RARITY[math.clamp(info.Rarity or 1, 1, #RARITY)] or T.Text,
+            Parent = f,
+        })
+
+        mk("TextLabel", {
+            Size = UDim2.new(1, -48, 0, 14),
+            Position = UDim2.fromOffset(44, 24),
+            BackgroundTransparency = 1,
+            Font = Enum.Font.GothamMedium,
+            TextSize = 10,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            Text = DATA.Money(info.Value or 0),
+            TextColor3 = T.Soft,
+            Parent = f,
+        })
+
+        rows[info.Uid] = { Frame = f, Stroke = fs }
+        f.MouseButton1Click:Connect(function()
+            setSel(info.Uid)
+            statusL.Text = "Selected: " .. (info.Name or "?")
+        end)
+    end
+    setSel(still and selectedUid or nil)
+    if #infos == 0 then statusL.Text = "No eggs on field" end
+end
+
+UI.RefreshBtn.MouseButton1Click:Connect(function()
+    if not state.Busy then
+        rebuild()
+        statusL.Text = "Refreshed"
+    end
+end)
+
+UI.StealBtn.MouseButton1Click:Connect(function()
+    if state.Busy then
+        state.Cancel = true
+        statusL.Text = "Cancelling"
+        return
+    end
+    if not selectedUid then
+        statusL.Text = "Pick a pet"
+        return
+    end
+    STEAL(selectedUid)
+end)
+
+task.spawn(function()
+    while UI.Gui.Parent do
+        task.wait(0.25)
+        UI.StealBtn.Text = state.Busy and "Cancel" or "Steal"
+        UI.StealBtn.BackgroundColor3 = state.Busy
+            and Color3.fromRGB(140, 20, 30) or T.Deep
+    end
+end)
+
+task.spawn(function()
+    while UI.Gui.Parent do
+        task.wait(4)
+        if not state.Busy then
+            pcall(rebuild)
+        end
+    end
+end)
+
+task.spawn(function()
+    task.wait(0.5)
+    pcall(rebuild)
+end)
+
+print("[UI] ★★★ 起動完了 ★★★")
