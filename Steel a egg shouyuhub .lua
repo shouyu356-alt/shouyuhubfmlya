@@ -161,6 +161,37 @@ local function shieldUndo()
 	end
 end
 
+local function shieldStart()
+	shieldSwap()
+	local n = 0
+	shield.Connection = RunService.Heartbeat:Connect(function(dt)
+		n += dt
+		local c = localPlayer.Character
+		local missing = not (shield.Clone and c and shield.Clone.Parent == c)
+		if (missing and 0.25 or 3) <= n then
+			n = 0
+			shieldSwap()
+		end
+	end)
+	shield.Added = localPlayer.CharacterAdded:Connect(function(c)
+		shieldUnlink()
+		shield.Original, shield.Clone = nil, nil
+		task.spawn(function()
+			c:WaitForChild("Humanoid", 10)
+			task.wait(1)
+			if shield.Connection and localPlayer.Character == c then
+				shieldSwap()
+			end
+		end)
+	end)
+end
+
+local function shieldStop()
+	if shield.Connection then shield.Connection:Disconnect(); shield.Connection = nil end
+	if shield.Added then shield.Added:Disconnect(); shield.Added = nil end
+	shieldUndo()
+end
+
 print("[SHOUYU] Part3 OK")
 if type(EggState) == "table" and type(EggState.CarryChanged) == "table"
 	and type(EggState.CarryChanged.Connect) == "function" then
@@ -177,6 +208,78 @@ if type(EggState) == "table" and type(EggState.CarryChanged) == "table"
 		state.Carrying = c
 	end)
 end
+
+pcall(function()
+	remote("RE/EggWorld/FieldEggRedeemVerdict").OnClientEvent:Connect(function()
+		state.Delivered = os.clock()
+	end)
+end)
+
+pcall(function()
+	remote("RE/RigSync/Refresh").OnClientEvent:Connect(function(a)
+		if type(a) == "table" and a.Action == "Relocate" then
+			state.PulledAt = os.clock()
+		end
+	end)
+end)
+
+local function takeEgg(uid)
+	if type(uid) == "string" and type(EggState) == "table"
+		and type(EggState.CarryFieldEgg) == "function" then
+		pcall(EggState.CarryFieldEgg, uid)
+	end
+end
+
+local function dropEgg()
+	if type(EggState) == "table" and type(EggState.DropFieldEgg) == "function" then
+		pcall(EggState.DropFieldEgg, "PlayerRequest")
+	end
+end
+
+local function promptNear(pos, radius)
+	local best, bestD = nil, radius
+	for _, c in ipairs(workspace:GetChildren()) do
+		if c.Name == "SmartPromptPart" and c:IsA("BasePart") then
+			local p = c:FindFirstChild("CarryAreaEgg")
+			if p and p:IsA("ProximityPrompt") then
+				local d = (c.Position - pos).Magnitude
+				if d < bestD then best, bestD = p, d end
+			end
+		end
+	end
+	return best
+end
+
+local function heldByMe(uid)
+	local c = localPlayer.Character
+	if type(uid) ~= "string" or not c then return false end
+	local egg = workspace:FindFirstChild(uid)
+	if not egg then return false end
+	for _, d in ipairs(egg:GetDescendants()) do
+		if d:IsA("WeldConstraint") or d:IsA("JointInstance") then
+			local ok, a, b = pcall(function() return d.Part0, d.Part1 end)
+			if ok and ((a and a:IsDescendantOf(c)) or (b and b:IsDescendantOf(c))) then
+				return true
+			end
+		end
+	end
+	return false
+end
+
+task.spawn(function()
+	while true do
+		task.wait(0.2)
+		if not state.Carrying then
+			if state.GuessedDrop and heldByMe(state.Uid) then
+				state.GuessedDrop, state.Carrying, state.HeldSeen = false, true, os.clock()
+			end
+		elseif heldByMe(state.Uid) then
+			state.HeldSeen = os.clock()
+		elseif os.clock() - state.HeldSeen > 0.8 then
+			state.Carrying, state.GuessedDrop = false, true
+		end
+	end
+end)
 
 local function snapshot()
 	local out = {}
@@ -238,6 +341,7 @@ local function money(v)
 end
 
 local status = function() end
+
 print("[SHOUYU] Part4 OK")
 local function frozenCamera()
 	local cam = workspace.CurrentCamera
@@ -281,6 +385,31 @@ local function dropClone()
 	if c then pcall(function() c:Destroy() end) end
 end
 
+local function postClone()
+	dropClone()
+	local c = localPlayer.Character
+	if not c then return end
+	local was = c.Archivable
+	c.Archivable = true
+	local copy = c:Clone()
+	c.Archivable = was
+	if copy then
+		for _, d in ipairs(copy:GetDescendants()) do
+			if d:IsA("LuaSourceContainer") or d:IsA("Humanoid") then
+				pcall(function() d:Destroy() end)
+			elseif d:IsA("BasePart") then
+				d.Anchored = true
+				d.CanCollide = false
+				d.CanTouch = false
+				d.CanQuery = false
+			end
+		end
+		copy.Name = "Clone"
+		copy.Parent = workspace
+		stealClone = copy
+	end
+end
+
 local function lineInfo()
 	local w = workspace:FindFirstChild("World") or workspace:FindFirstChild("__OBJECTS")
 	w = w and w:FindFirstChild("Areas")
@@ -290,6 +419,19 @@ local function lineInfo()
 end
 
 local function homePoint()
+	for _, def in ipairs({
+		{ { "GearGiver_Slap", "Podium" }, Vector3.new(-16.415, 21.072, -6.106) },
+		{ { "World", "Machines", "RiftMachine", "Rift", "Meshes/VoidPortal_Cube.003" }, Vector3.new(-26.776, 1.75, 18.665) },
+		{ { "__OBJECTS", "Machines", "RiftMachine", "Rift", "Meshes/VoidPortal_Cube.003" }, Vector3.new(-26.776, 1.75, 18.665) },
+	}) do
+		local n = workspace
+		for _, name in ipairs(def[1]) do
+			n = n and n:FindFirstChild(name) or nil
+		end
+		if n and n:IsA("BasePart") then
+			return n.CFrame:PointToWorldSpace(def[2])
+		end
+	end
 	return Vector3.new(528.7, 70.57, -364.11)
 end
 
@@ -304,31 +446,84 @@ local function place(pos)
 end
 
 print("[SHOUYU] Part5 OK")
-local function takeEgg(uid)
-	if type(uid) == "string" and type(EggState) == "table"
-		and type(EggState.CarryFieldEgg) == "function" then
-		pcall(EggState.CarryFieldEgg, uid)
-	end
-end
-
-local function dropEgg()
-	if type(EggState) == "table" and type(EggState.DropFieldEgg) == "function" then
-		pcall(EggState.DropFieldEgg, "PlayerRequest")
-	end
-end
-
-local function promptNear(pos, radius)
-	local best, bestD = nil, radius
-	for _, c in ipairs(workspace:GetChildren()) do
-		if c.Name == "SmartPromptPart" and c:IsA("BasePart") then
-			local p = c:FindFirstChild("CarryAreaEgg")
-			if p and p:IsA("ProximityPrompt") then
-				local d = (c.Position - pos).Magnitude
-				if d < bestD then best, bestD = p, d end
-			end
+local function runToEgg(uid, egg)
+	local lineX = lineInfo()
+	local home = homePoint()
+	local c = localPlayer.Character
+	local h = c and c:FindFirstChildOfClass("Humanoid")
+	if h then
+		h.PlatformStand = false
+		if c:FindFirstChildWhichIsA("Tool") then
+			pcall(function() h:UnequipTools() end)
 		end
 	end
-	return best
+	local r = root()
+	if not r then return false end
+	local stage = "field"
+	if r.Position.X < lineX - 2
+		and Vector3.new(r.Position.X - home.X, 0, r.Position.Z - home.Z).Magnitude > 20 then
+		stage = "safe"
+	end
+	local started, lastCheck, lastPos, lastTake = os.clock(), os.clock(), r.Position, 0
+	while os.clock() - started < 120 and not state.Cancel do
+		r = root()
+		if not r then return false end
+		local flatEgg = Vector3.new(egg.X - r.Position.X, 0, egg.Z - r.Position.Z)
+		if stage == "field" and flatEgg.Magnitude <= 2.5 then break end
+		local target = egg
+		if stage == "safe" then
+			if Vector3.new(home.X - r.Position.X, 0, home.Z - r.Position.Z).Magnitude <= 6 then
+				stage = "field"
+			else
+				target = home
+			end
+		end
+		local flat = Vector3.new(target.X - r.Position.X, 0, target.Z - r.Position.Z)
+		local unit = flat.Magnitude > 0.01 and flat.Unit or Vector3.zero
+		local speed = 3500
+		local v = unit * math.min(speed, flat.Magnitude / 0.05)
+		pcall(function()
+			r.AssemblyLinearVelocity = Vector3.new(v.X, r.AssemblyLinearVelocity.Y, v.Z)
+			if h and unit.Magnitude > 0 then h:Move(unit, false) end
+		end)
+		if os.clock() - lastCheck >= 1.5 then
+			if (r.Position - lastPos).Magnitude < 3 and h and flatEgg.Magnitude > 15 then
+				pcall(function() h.Jump = true end)
+			end
+			lastPos, lastCheck = r.Position, os.clock()
+		end
+		if stage == "field" and flatEgg.Magnitude <= 9 and os.clock() - lastTake > 0.1 then
+			lastTake = os.clock()
+			takeEgg(uid)
+		end
+		RunService.Heartbeat:Wait()
+	end
+	r = root()
+	if r then
+		pcall(function()
+			r.AssemblyLinearVelocity = Vector3.new(0, r.AssemblyLinearVelocity.Y, 0)
+			if h then h:Move(Vector3.zero, false) end
+		end)
+	end
+	return state.Carrying or (r ~= nil and Vector3.new(egg.X - r.Position.X, 0, egg.Z - r.Position.Z).Magnitude <= 6)
+end
+
+local function eggNow(uid, cache)
+	local node = workspace:FindFirstChild(uid)
+	local slots = workspace:FindFirstChild("AreaEggSlotsClient")
+	node = node or (slots and slots:FindFirstChild(uid))
+	if node then
+		local ok, pos = pcall(function() return node:GetPivot().Position end)
+		if ok and pos then
+			cache.Pos, cache.At = pos, os.clock()
+			return pos
+		end
+	end
+	if os.clock() - cache.At >= 0.5 then
+		cache.At = os.clock()
+		cache.Pos = eggPosition(uid) or cache.Pos
+	end
+	return cache.Pos
 end
 
 local function grab(uid, timeout)
@@ -336,28 +531,147 @@ local function grab(uid, timeout)
 	local waited, since = 0, 1
 	while not state.Carrying and waited < timeout and not state.Cancel do
 		local r = root()
+		local egg = eggNow(uid, cache)
 		local dt = math.max(RunService.Heartbeat:Wait(), 1/240)
 		waited += dt
 		since += dt
-		if since >= CFG.GrabInterval then
+		if r and egg then
+			local delta = egg - r.Position
+			if delta.Magnitude > 2 then
+				local pace = math.max(walkSpeed() * CFG.SpeedCap, 16)
+				local v = delta / math.max(0.08, dt)
+				if v.Magnitude > pace then v = v.Unit * pace end
+				pcall(function()
+					r.AssemblyLinearVelocity = v + Vector3.new(0, workspace.Gravity * dt * 0.5, 0)
+					r.AssemblyAngularVelocity = Vector3.zero
+				end)
+			end
+			if since >= CFG.GrabInterval then
+				since = 0
+				local p = promptNear(egg - Vector3.new(0, 3, 0), 10)
+				if p and typeof(fireproximityprompt) == "function" then
+					pcall(function() p.HoldDuration = 0 end)
+					pcall(fireproximityprompt, p)
+				end
+				task.spawn(takeEgg, uid)
+			end
+		elseif since >= CFG.GrabInterval then
 			since = 0
 			task.spawn(takeEgg, uid)
 		end
 	end
+	local r = root()
+	if r then pcall(function() r.AssemblyLinearVelocity = Vector3.zero end) end
 	return state.Carrying and state.Uid == uid
 end
 
+print("[SHOUYU] Part6 OK")
 local function regrab(uid)
 	if state.Carrying then return true end
 	local r = root()
 	local egg = eggPosition(uid)
 	if r and egg and Vector3.new(r.Position.X - egg.X, 0, r.Position.Z - egg.Z).Magnitude > CFG.RegrabFar then
+		status("The egg fell far behind, teleporting onto it")
 		place(egg + Vector3.new(0, 3, 0))
+	else
+		status("The egg fell close, taking it back")
 	end
 	return grab(uid, 3)
 end
 
-print("[SHOUYU] Part6 OK")
+local function groundY(pos, fallback)
+	local y = fallback
+	pcall(function()
+		local p = RaycastParams.new()
+		p.FilterType = Enum.RaycastFilterType.Exclude
+		p.FilterDescendantsInstances = { localPlayer.Character }
+		p.IgnoreWater = true
+		local hit = workspace:Raycast(pos + Vector3.new(0, 60, 0), Vector3.new(0, -140, 0), p)
+		if hit and hit.Material ~= Enum.Material.Water
+			and math.abs(hit.Position.Y - fallback) < 40 then
+			y = hit.Position.Y + 3.5
+		end
+	end)
+	return y
+end
+
+local function carrySpeed(distance)
+	local ws = walkSpeed()
+	local base = ws * math.min(CFG.CarryRatio, CFG.SpeedCap) * state.Mult
+	local fast = base * 1.5
+	local excess = 5.5 * base
+	local limit = fast
+	if distance and distance > excess then
+		limit = math.min(fast, base * distance / (distance - excess))
+	end
+	return math.min(math.max(math.min(base * CFG.EasyRatio, limit), base), math.max(ws * CFG.SpeedCap, base))
+end
+
+local function runHome(lineX, laneZ)
+	local started = os.clock()
+	local home = homePoint()
+	local checkpoint = lineX - 7
+	local height = CFG.Height
+	local share = math.clamp(CFG.ClimbShare, 0.1, 0.9)
+	local descent = height * math.sqrt(1 - share * share) / share
+	local c = localPlayer.Character
+	local h = c and c:FindFirstChildOfClass("Humanoid")
+	if h then h.PlatformStand = false end
+	local r = root()
+	if r and c and height > 0.5 and home.Y + height - 2 > r.Position.Y then
+		pcall(function()
+			c:PivotTo(CFrame.new(Vector3.new(r.Position.X, home.Y + height, r.Position.Z)) * r.CFrame.Rotation)
+			r.AssemblyLinearVelocity = Vector3.zero
+			r.AssemblyAngularVelocity = Vector3.zero
+		end)
+	end
+	local start = root()
+	local speed = carrySpeed(start and (Vector3.new(start.Position.X - home.X, 0, start.Position.Z - home.Z).Magnitude + math.max(0, height) * 2) or nil)
+	local last = os.clock()
+	local timeout = 0
+	status("Safe zone")
+	while state.Carrying and state.Delivered < started and not state.Cancel and timeout < 25 do
+		r = root()
+		if not r then return false end
+		local now = os.clock()
+		local dt = math.max(now - last, 1/240)
+		last = now
+		timeout += dt
+		local toHome = r.Position.X <= checkpoint + 2
+		local target = toHome and home or Vector3.new(checkpoint, home.Y, laneZ)
+		if toHome and Vector3.new(home.X - r.Position.X, 0, home.Z - r.Position.Z).Magnitude < 2 then
+			break
+		end
+		local flat = Vector3.new(target.X - r.Position.X, 0, target.Z - r.Position.Z)
+		local remaining = toHome and 0 or math.max(0, r.Position.X - checkpoint)
+		local wantY = home.Y + height
+		if toHome or remaining <= descent then
+			wantY = home.Y + height * math.clamp(remaining / math.max(descent, 1), 0, 1)
+		end
+		local vy = math.clamp((wantY - r.Position.Y) / 0.12, -speed * share, speed * share)
+		local horizontal = math.sqrt(math.max(speed * speed - vy * vy, 0))
+		local v = flat.Magnitude > 0.01 and flat.Unit * math.min(horizontal, flat.Magnitude / 0.05) or Vector3.zero
+		pcall(function()
+			r.AssemblyLinearVelocity = Vector3.new(v.X, vy, v.Z)
+		end)
+		RunService.Heartbeat:Wait()
+	end
+	if h then pcall(function() h:Move(Vector3.zero, false) end) end
+	local settle = 0
+	while settle < 2 and state.Delivered < started and state.Carrying and not state.Cancel do
+		settle += RunService.Heartbeat:Wait()
+	end
+	if state.Carrying and state.Delivered < started and not state.Cancel then
+		task.wait(0.2)
+		dropEgg()
+		local w = 0
+		while state.Delivered < started and w < 1 do
+			w += RunService.Heartbeat:Wait()
+		end
+	end
+	return state.Delivered >= started
+end
+
 local function instantTP(uid)
 	local started = os.clock()
 	local lineX, lineY = lineInfo()
@@ -365,10 +679,102 @@ local function instantTP(uid)
 	if not r then return false end
 	local laneZ = math.clamp(r.Position.Z, -425, -300)
 	local landing = Vector3.new(lineX + CFG.LandOffset, lineY + 3.35, laneZ)
+	local hopStep = math.max(walkSpeed() * CFG.HopRatio, CFG.HopMin)
+	local hopY = r.Position.Y + CFG.HopLift
+	local x = r.Position.X
+	local retries = 0
+	local releaseCamera = frozenCamera()
+	state.ReleaseCamera = releaseCamera
+	pcall(postClone)
 	fpsOn()
+	while x - hopStep > landing.X and not state.Cancel do
+		if not state.Carrying then
+			if not regrab(uid) then break end
+			local cur = root()
+			if cur then x = math.min(x, cur.Position.X) end
+			continue
+		end
+		local nextX = x - hopStep
+		local pulledBefore = state.PulledAt
+		local held = 0
+		while held < CFG.HopGap do
+			place(Vector3.new(nextX, hopY, laneZ))
+			held += RunService.Heartbeat:Wait()
+		end
+		local check = root()
+		local pulled = state.PulledAt > pulledBefore
+			or (check ~= nil and (check.Position.X - nextX > 10
+				or check.AssemblyLinearVelocity.Magnitude > 150))
+		if pulled and state.Carrying and not state.Cancel then
+			retries += 1
+			CFG.HopGap = math.min(CFG.HopGapMax, CFG.HopGap + 0.02)
+			if retries > CFG.HopRetries then break end
+			local s = 0
+			while s < 0.12 and not state.Cancel do
+				place(Vector3.new(x, hopY, laneZ))
+				s += RunService.Heartbeat:Wait()
+			end
+		else
+			x = nextX
+			CFG.HopGap = math.max(CFG.HopGapMin, CFG.HopGap - 0.01)
+		end
+	end
+	landing = Vector3.new(landing.X, groundY(landing, landing.Y), landing.Z)
+	local function land()
+		local cur = root()
+		if cur and cur.Position.X <= landing.X + 1 and cur.Position.Y > landing.Y - 25 then
+			pcall(function() cur.AssemblyLinearVelocity = Vector3.zero end)
+			return
+		end
+		place(landing)
+	end
+	land()
+	for _ = 1, 3 do
+		local s = 0
+		while s < CFG.LandSettle and not state.Cancel do
+			s += RunService.Heartbeat:Wait()
+		end
+		local landed = root()
+		if state.Carrying and landed
+			and (landed.Position.X - landing.X > 12 or landed.Position.Y < landing.Y - 25) then
+			land()
+		else
+			break
+		end
+	end
 	dropClone()
+	if state.Carrying and not state.Cancel then
+		local delay = 0
+		while delay < CFG.DropDelay do
+			delay += RunService.Heartbeat:Wait()
+		end
+		dropEgg()
+		local waited = 0
+		while state.Carrying and waited < 1 and not state.Cancel do
+			waited += RunService.Heartbeat:Wait()
+		end
+		local cur = root()
+		if cur then
+			pcall(function()
+				cur.AssemblyLinearVelocity = Vector3.zero
+				cur.AssemblyAngularVelocity = Vector3.zero
+			end)
+		end
+		releaseCamera()
+		dropClone()
+		if not grab(uid, 3) and not regrab(uid) then
+			fpsOff()
+			return false
+		end
+		dropClone()
+	end
+	releaseCamera()
+	local ok = false
+	if state.Carrying then
+		ok = runHome(lineX, laneZ)
+	end
 	fpsOff()
-	return state.Delivered >= started
+	return ok or state.Delivered >= started
 end
 
 local function stealAndDeliver(uid)
@@ -376,13 +782,43 @@ local function stealAndDeliver(uid)
 	state.Busy = true
 	state.Cancel = false
 	task.spawn(function()
-		pcall(function()
+		local ok, err = pcall(function()
+			status("Looking for the egg")
 			local egg = eggPosition(uid)
-			if egg then
-				grab(uid, 4)
-				instantTP(uid)
+			if not egg then
+				status("That egg is gone")
+				return
 			end
+			if state.Carrying and state.Uid ~= uid then
+				dropEgg()
+				local w = 0
+				while state.Carrying and w < 1 do
+					w += RunService.Heartbeat:Wait()
+				end
+			end
+			fpsOn()
+			status("Going to the egg")
+			if not runToEgg(uid, egg) then
+				fpsOff()
+				status("Could not reach the egg")
+				return
+			end
+			status("Taking the egg")
+			if not grab(uid, 4) then
+				fpsOff()
+				status("The egg would not come free")
+				return
+			end
+			local delivered = instantTP(uid)
+			status(delivered and "Delivered" or "Delivery failed")
 		end)
+		fpsOff()
+		dropClone()
+		if state.ReleaseCamera then
+			pcall(state.ReleaseCamera)
+			state.ReleaseCamera = nil
+		end
+		if not ok then status("Error: " .. tostring(err)) end
 		state.Busy = false
 	end)
 end
