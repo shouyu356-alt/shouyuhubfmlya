@@ -949,7 +949,8 @@ local function stealAndDeliver(uid, instant)
 end
 
 print("[SHOUYU] Part4 OK")-- ================================================================
--- Part 5/7 : UI本体
+-- ================================================================
+-- Part 5/7 (修正版) : UI本体（中サイズ 240x460）
 -- ================================================================
 
 local prev = parentGui():FindFirstChild("ShouyuHubMoon")
@@ -964,7 +965,10 @@ local gui = make("ScreenGui", {
 })
 gui.Parent = parentGui()
 
-local W, H = 380, 640
+-- ★ 中サイズ
+local W, H = 240, 460
+local HEADER_H = 70
+
 local window = make("Frame", {
 	Size = UDim2.fromOffset(W, H),
 	Position = UDim2.new(0.5, -W/2, 0.5, -H/2),
@@ -973,8 +977,8 @@ local window = make("Frame", {
 	ClipsDescendants = true,
 })
 window.Parent = gui
-corner(window, 18)
-livingStroke(window, 2, true)
+corner(window, 14)
+livingStroke(window, 1.5, true)
 
 -- 動く光
 do
@@ -992,8 +996,8 @@ do
 end
 
 ------------------------------------------------------------------ ヘッダー
-local HEADER_H = 90
 local header = make("Frame", {
+	Name = "Header",
 	Size = UDim2.new(1, 0, 0, HEADER_H),
 	Position = UDim2.fromOffset(0, 0),
 	BackgroundColor3 = MOON_CARD,
@@ -1009,87 +1013,101 @@ make("Frame", {
 }).Parent = header
 
 -- 月ロゴ
-local logoSize = 56
+local logoSize = 42
 local logoFrame = make("Frame", {
 	Size = UDim2.fromOffset(logoSize, logoSize),
-	Position = UDim2.fromOffset(16, 17),
+	Position = UDim2.fromOffset(12, 14),
 	BackgroundColor3 = MOON_GLOW,
 	BorderSizePixel = 0,
 })
 logoFrame.Parent = header
 corner(logoFrame, logoSize / 2)
+make("Frame", {
+	Size = UDim2.fromOffset(logoSize - 9, logoSize - 9),
+	Position = UDim2.fromOffset(11, -2),
+	BackgroundColor3 = MOON_CARD,
+	BorderSizePixel = 0,
+	Parent = logoFrame,
+}):FindFirstChild("") -- ダミー
+corner(logoFrame:FindFirstChildWhichIsA("Frame") or logoFrame, (logoSize - 9) / 2)
+
+-- ↑上のミニテクはやめて普通に書く
 local moonShadow = make("Frame", {
-	Size = UDim2.fromOffset(logoSize - 12, logoSize - 12),
-	Position = UDim2.fromOffset(14, -3),
+	Size = UDim2.fromOffset(logoSize - 10, logoSize - 10),
+	Position = UDim2.fromOffset(12, -2),
 	BackgroundColor3 = MOON_CARD,
 	BorderSizePixel = 0,
 })
 moonShadow.Parent = logoFrame
-corner(moonShadow, (logoSize - 12) / 2)
+corner(moonShadow, (logoSize - 10) / 2)
 
 txt(header, {
-	Size = UDim2.new(1, -160, 0, 26),
-	Position = UDim2.fromOffset(84, 20),
+	Size = UDim2.new(1, -110, 0, 20),
+	Position = UDim2.fromOffset(62, 14),
 	Font = Enum.Font.GothamBlack,
-	TextSize = 22,
+	TextSize = 16,
 	TextXAlignment = Enum.TextXAlignment.Left,
 	Text = "SHOUYU HUB",
 	TextColor3 = Color3.fromRGB(255, 120, 120),
 	Living = false,
 })
 txt(header, {
-	Size = UDim2.new(1, -160, 0, 18),
-	Position = UDim2.fromOffset(84, 50),
+	Size = UDim2.new(1, -110, 0, 14),
+	Position = UDim2.fromOffset(62, 38),
 	Font = Enum.Font.Gotham,
-	TextSize = 13,
+	TextSize = 10,
 	TextXAlignment = Enum.TextXAlignment.Left,
 	Text = "STEAL AN EGG",
 	TextColor3 = MOON_SUB,
 	Living = false,
 })
 
+-- 最小化ボタン
 local minBtn = make("TextButton", {
-	Size = UDim2.fromOffset(40, 40),
-	Position = UDim2.new(1, -100, 0, 25),
+	Name = "MinBtn",
+	Size = UDim2.fromOffset(30, 30),
+	Position = UDim2.new(1, -74, 0, 20),
 	BackgroundColor3 = MOON_CARD2,
 	Font = Enum.Font.GothamBlack,
-	TextSize = 22,
+	TextSize = 18,
 	TextColor3 = MOON_TEXT,
 	Text = "-",
 	AutoButtonColor = false,
 	BorderSizePixel = 0,
 })
 minBtn.Parent = header
-corner(minBtn, 8)
-livingStroke(minBtn, 1.5, false)
+corner(minBtn, 7)
+livingStroke(minBtn, 1, false)
 
+-- 閉じるボタン
 local closeBtn = make("TextButton", {
-	Size = UDim2.fromOffset(40, 40),
-	Position = UDim2.new(1, -52, 0, 25),
+	Name = "CloseBtn",
+	Size = UDim2.fromOffset(30, 30),
+	Position = UDim2.new(1, -40, 0, 20),
 	BackgroundColor3 = MOON_RED,
 	Font = Enum.Font.GothamBlack,
-	TextSize = 20,
+	TextSize = 16,
 	TextColor3 = MOON_TEXT,
 	Text = "X",
 	AutoButtonColor = false,
 	BorderSizePixel = 0,
 })
 closeBtn.Parent = header
-corner(closeBtn, 8)
+corner(closeBtn, 7)
 
 ------------------------------------------------------------------ ステータス行
 local statusRow = make("Frame", {
-	Size = UDim2.new(1, -24, 0, 32),
-	Position = UDim2.fromOffset(12, HEADER_H + 12),
+	Size = UDim2.new(1, -16, 0, 26),
+	Position = UDim2.fromOffset(8, HEADER_H + 8),
 	BackgroundTransparency = 1,
 })
 statusRow.Parent = window
 
 local statusLabel = txt(statusRow, {
-	Size = UDim2.new(1, -180, 1, 0),
-	Position = UDim2.fromOffset(6, 0),
+	Size = UDim2.new(1, -100, 1, 0),
+	Position = UDim2.fromOffset(4, 0),
 	Font = Enum.Font.GothamMedium,
-	TextSize = 14,
+	TextSize = 11,
 	TextXAlignment = Enum.TextXAlignment.Left,
 	Text = "待機中...",
 	TextColor3 = MOON_ACCENT,
@@ -1097,54 +1115,55 @@ local statusLabel = txt(statusRow, {
 statusCallback = function(s) statusLabel.Text = tostring(s) end
 
 local autoUpdateBtn = make("TextButton", {
-	Size = UDim2.fromOffset(150, 30),
-	Position = UDim2.new(1, -156, 0, 1),
+	Size = UDim2.fromOffset(90, 24),
+	Position = UDim2.new(1, -94, 0, 1),
 	BackgroundColor3 = MOON_CARD2,
 	Font = Enum.Font.GothamBold,
-	TextSize = 13,
+	TextSize = 10,
 	TextColor3 = MOON_TEXT,
-	Text = "自動更新  ON",
+	Text = "自動更新 ON",
 	AutoButtonColor = false,
 	BorderSizePixel = 0,
 })
 autoUpdateBtn.Parent = statusRow
-corner(autoUpdateBtn, 7)
+corner(autoUpdateBtn, 6)
 livingStroke(autoUpdateBtn, 1, false)
 
 local autoUpdateOn = true
 autoUpdateBtn.MouseButton1Click:Connect(function()
 	autoUpdateOn = not autoUpdateOn
-	autoUpdateBtn.Text = autoUpdateOn and "自動更新  ON" or "自動更新  OFF"
+	autoUpdateBtn.Text = autoUpdateOn and "自動更新 ON" or "自動更新 OFF"
 	autoUpdateBtn.TextColor3 = autoUpdateOn and MOON_GREEN or MOON_SUB
 end)
 
 ------------------------------------------------------------------ 卵リスト
-local BOTTOM_BTN_H = 60
-local listTop = HEADER_H + 12 + 32 + 12
-local listH = H - listTop - BOTTOM_BTN_H - 20
+local BOTTOM_BTN_H = 44
+local listTop = HEADER_H + 8 + 26 + 8
+local listH = H - listTop - BOTTOM_BTN_H - 16
 
 local list = make("ScrollingFrame", {
-	Size = UDim2.new(1, -24, 0, listH),
-	Position = UDim2.fromOffset(12, listTop),
+	Name = "EggList",
+	Size = UDim2.new(1, -16, 0, listH),
+	Position = UDim2.fromOffset(8, listTop),
 	BackgroundColor3 = MOON_CARD,
 	BorderSizePixel = 0,
-	ScrollBarThickness = 5,
+	ScrollBarThickness = 4,
 	ScrollBarImageColor3 = MOON_STROKE,
 	CanvasSize = UDim2.new(),
 	AutomaticCanvasSize = Enum.AutomaticSize.Y,
 })
 list.Parent = window
-corner(list, 12)
-livingStroke(list, 1.5, false)
+corner(list, 10)
+livingStroke(list, 1, false)
 make("UIListLayout", {
-	Padding = UDim.new(0, 6),
+	Padding = UDim.new(0, 4),
 	SortOrder = Enum.SortOrder.LayoutOrder,
 }).Parent = list
 make("UIPadding", {
-	PaddingTop = UDim.new(0, 8),
-	PaddingBottom = UDim.new(0, 8),
-	PaddingLeft = UDim.new(0, 8),
-	PaddingRight = UDim.new(0, 8),
+	PaddingTop = UDim.new(0, 6),
+	PaddingBottom = UDim.new(0, 6),
+	PaddingLeft = UDim.new(0, 6),
+	PaddingRight = UDim.new(0, 6),
 }).Parent = list
 
 local rarityColors = {
@@ -1165,7 +1184,7 @@ local function setSelected(uid)
 	selectedUid = uid
 	for rowUid, row in pairs(rows) do
 		local on = rowUid == uid
-		row.Stroke.Thickness = on and 2 or 1
+		row.Stroke.Thickness = on and 1.8 or 1
 		row.Stroke.Color = on and MOON_GLOW or MOON_STROKE
 		row.Frame.BackgroundColor3 = on and MOON_CARD2 or MOON_CARD
 	end
@@ -1180,21 +1199,20 @@ local function rebuild()
 	table.sort(infos, function(a, b) return a.Value > b.Value end)
 
 	if #infos == 0 then
-		local empty = txt(list, {
-			Size = UDim2.new(1, 0, 0, 50),
+		txt(list, {
+			Size = UDim2.new(1, 0, 0, 40),
 			Font = Enum.Font.Gotham,
-			TextSize = 14,
+			TextSize = 12,
 			TextColor3 = MOON_SUB,
 			Text = "フィールドに卵がありません",
 		})
-		empty.Name = "EmptyMsg"
 		statusLabel.Text = "待機中..."
 		return
 	end
 
 	for i, info in ipairs(infos) do
 		local frame = make("TextButton", {
-			Size = UDim2.new(1, 0, 0, 60),
+			Size = UDim2.new(1, 0, 0, 46),
 			BackgroundColor3 = MOON_CARD,
 			LayoutOrder = i,
 			Text = "",
@@ -1202,17 +1220,17 @@ local function rebuild()
 			BorderSizePixel = 0,
 		})
 		frame.Parent = list
-		corner(frame, 10)
+		corner(frame, 8)
 		local rowStroke = livingStroke(frame, 1, false)
 
 		local iconBox = make("Frame", {
-			Size = UDim2.fromOffset(44, 44),
-			Position = UDim2.fromOffset(8, 8),
+			Size = UDim2.fromOffset(34, 34),
+			Position = UDim2.fromOffset(6, 6),
 			BackgroundColor3 = MOON_BG,
 			BorderSizePixel = 0,
 		})
 		iconBox.Parent = frame
-		corner(iconBox, 8)
+		corner(iconBox, 6)
 		if info.Icon ~= "" then
 			make("ImageLabel", {
 				Size = UDim2.fromScale(0.9, 0.9),
@@ -1225,20 +1243,20 @@ local function rebuild()
 		end
 
 		txt(frame, {
-			Size = UDim2.new(1, -70, 0, 22),
-			Position = UDim2.fromOffset(60, 10),
+			Size = UDim2.new(1, -50, 0, 18),
+			Position = UDim2.fromOffset(46, 6),
 			Font = Enum.Font.GothamBold,
-			TextSize = 15,
+			TextSize = 12,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			TextTruncate = Enum.TextTruncate.AtEnd,
 			Text = info.Name,
 			TextColor3 = rarityColors[math.clamp(info.Rarity, 1, #rarityColors)] or MOON_TEXT,
 		})
 		txt(frame, {
-			Size = UDim2.new(1, -70, 0, 18),
-			Position = UDim2.fromOffset(60, 33),
+			Size = UDim2.new(1, -50, 0, 14),
+			Position = UDim2.fromOffset(46, 25),
 			Font = Enum.Font.GothamMedium,
-			TextSize = 13,
+			TextSize = 10,
 			TextXAlignment = Enum.TextXAlignment.Left,
 			Text = money(info.Value),
 			TextColor3 = MOON_SUB,
@@ -1247,13 +1265,13 @@ local function rebuild()
 		rows[info.Uid] = { Frame = frame, Stroke = rowStroke }
 		frame.MouseButton1Click:Connect(function()
 			setSelected(info.Uid)
-			statusLabel.Text = "選択中: " .. info.Name
+			statusLabel.Text = "選択: " .. info.Name
 		end)
 	end
 	statusLabel.Text = string.format("%d 個の卵を検出", #infos)
 end
 
-print("[SHOUYU] Part5 OK")-- ================================================================
+print("[SHOUYU] Part5 (中サイズ) OK")
 -- Part 6/7 : ボタン + ロジック接続（★ここが動く鍵）
 -- ================================================================
 
