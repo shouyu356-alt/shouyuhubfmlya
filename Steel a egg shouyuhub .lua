@@ -593,7 +593,7 @@ local function runHome(lineX, laneZ)
 	local home = homePoint()
 	local checkpoint = lineX - 7
 	local height = CFG.Height
-	local share = math.clamp(CFG.ClimbShare, 0.1, 0.9)
+	local share = math.clamp(CFG.ClimbShare, 0.1, 0.2.5)
 	local descent = height * math.sqrt(1 - share * share) / share
 	local character = localPlayer.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
