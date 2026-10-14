@@ -610,8 +610,8 @@ local function runHome(lineX, laneZ)
 		end)
 	end
 
-	-- ★ 帰り速度 500
-	local speed = 500
+	-- ★ 帰り速度 320
+	local speed = 320
 	local last = os.clock()
 	local timeout = 0
 	status("Safe zone")
