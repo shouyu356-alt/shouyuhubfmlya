@@ -1031,7 +1031,8 @@ local function stealAndDeliver(uid)
 		state.Busy = false
 	end)
 				end-- ============================================================
--- PART 6/6 - ShouyuHub UI
+-- ============================================================
+-- PART 6/6 - ShouyuHub UI (Delta対応版)
 -- ============================================================
 
 print("[ShouyuHub] UI構築開始")
@@ -1053,14 +1054,9 @@ local AUTO_REFRESH = 4
 local UI = { W = 340, H = 500, Scale = 1, Minimized = false }
 local UI_W, UI_H, UI_H_MIN = UI.W, UI.H, 68
 
+-- ★ Delta対応: PlayerGui を直接使う
 local function getParent()
-    if type(gethui) == "function" then
-        local ok, r = pcall(gethui)
-        if ok and typeof(r) == "Instance" then return r end
-    end
-    local ok, cg = pcall(function() return game:GetService("CoreGui") end)
-    if ok and cg then return cg end
-    return localPlayer:FindFirstChildOfClass("PlayerGui")
+    return localPlayer:WaitForChild("PlayerGui")
 end
 
 local gui = Instance.new("ScreenGui")
@@ -1071,19 +1067,7 @@ gui.DisplayOrder = 999999
 gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 gui.Enabled = true
 
-if type(syn) == "table" and type(syn.protect_gui) == "function" then
-    pcall(syn.protect_gui, gui)
-end
-
-local parent = getParent()
-if parent then
-    local ok = pcall(function() gui.Parent = parent end)
-    if not ok or not gui.Parent then
-        local pg = localPlayer:WaitForChild("PlayerGui", 5)
-        if pg then gui.Parent = pg end
-    end
-end
-
+gui.Parent = getParent()
 print("[ShouyuHub] GUI Parent:", gui.Parent and gui.Parent:GetFullName() or "nil")
 
 local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1280, 720)
@@ -1457,4 +1441,4 @@ end)
 
 shieldStart()
 
-print("[ShouyuHub] 起動完了 / 速度 " .. CFG.SpeedToEgg) 
+print("[ShouyuHub] 起動完了 / 速度 " .. CFG.SpeedToEgg)
