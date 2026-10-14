@@ -1,7 +1,7 @@
 -- ============================================================
--- ShouyuHub 作り直し版 | PART 1/4
+-- ShouyuHub 完全版 | PART 1/4
 -- 初期化・設定・シールド
--- 速度1000 (Chilli Hub式: Velocity + CFrameフォールバック)
+-- 純CFrame移動 / 速度1000 / 検知回避
 -- ============================================================
 local Players           = game:GetService("Players")
 local RunService        = game:GetService("RunService")
@@ -13,8 +13,8 @@ local localPlayer       = Players.LocalPlayer
 local IS_MOBILE         = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
 
 local CFG = {
-	SpeedToEgg    = 1000,   -- ★ 行き
-	SpeedHome     = 500,    -- ★ 帰り
+	SpeedToEgg    = 1000,   -- ★ 卵へ向かう速度（Chilli Hub上限）
+	SpeedHome     = 500,    -- ★ 帰る速度
 	GrabInterval  = 0.03,
 	RegrabFar     = 40,
 	Height        = 70,
@@ -50,7 +50,7 @@ local function root()
 	return character and character:FindFirstChild("HumanoidRootPart")
 end
 
------------------------------------------------------------------- シールド（Humanoid Swap）
+------------------------------------------------------------------ シールド
 local shield = { Original = nil, Clone = nil, Links = {}, Connection = nil, Added = nil }
 
 local function shieldControls(humanoid)
@@ -192,8 +192,8 @@ local function shieldStop()
 	if shield.Added then shield.Added:Disconnect(); shield.Added = nil end
 	shieldUndo()
 end-- ============================================================
--- ShouyuHub 作り直し版 | PART 2/4
--- ステート・卵情報・Chilli Hub式移動関数
+-- ShouyuHub 完全版 | PART 2/4
+-- ステート・卵情報・純CFrame移動関数
 -- ============================================================
 local state = {
 	Carrying = false, Uid = nil, Delivered = 0,
@@ -374,42 +374,31 @@ local function homePoint()
 	return Vector3.new(528.7, 70.57, -364.11)
 end
 
------------------------------------------------------------------- ★ Chilli Hub式移動関数
--- Velocity + CFrameフォールバック（スタック時のみ瞬間移動）
+------------------------------------------------------------------ ★ 純CFrame移動
+-- AssemblyLinearVelocityは常にゼロ、CFrameで直接移動
 local function chilliMove(r, target, speed, dt, mark)
 	local delta = target - r.Position
 	local magnitude = delta.Magnitude
 	local n = math.max(dt, 0.0041666666666666666)
-	local v = Vector3.zero
 
-	if magnitude > 0.01 then
-		v = delta.Unit * math.min(speed, magnitude / n)
+	if magnitude < 0.05 then
+		pcall(function()
+			r.AssemblyLinearVelocity = Vector3.zero
+			r.AssemblyAngularVelocity = Vector3.zero
+		end)
+		return true
 	end
 
-	local vel = v + Vector3.new(0, workspace.Gravity * n * 0.5, 0)
-
-	-- ★ CFrameフォールバック（0.4秒ごとにスタック判定）
-	if magnitude > 2 then
-		if not mark.mark then
-			mark.mark = magnitude
-			mark.clock = 0
-		end
-		mark.clock = mark.clock + dt
-		if mark.clock >= 0.4 then
-			if mark.mark - magnitude < speed * 0.1 then
-				pcall(function()
-					r.CFrame = r.CFrame + delta.Unit * math.min(magnitude, speed * n)
-				end)
-			end
-			mark.mark = magnitude
-			mark.clock = 0
-		end
-	else
-		mark.mark = nil
-	end
+	local step = math.min(magnitude, speed * n)
+	local newPos = r.Position + delta.Unit * step
+	local lookFlat = Vector3.new(delta.X, 0, delta.Z)
+	local rot = lookFlat.Magnitude > 0.05
+		and CFrame.lookAt(Vector3.zero, lookFlat.Unit)
+		or r.CFrame.Rotation
 
 	pcall(function()
-		r.AssemblyLinearVelocity = vel
+		r.CFrame = CFrame.new(newPos) * rot
+		r.AssemblyLinearVelocity = Vector3.zero
 		r.AssemblyAngularVelocity = Vector3.zero
 	end)
 
@@ -473,26 +462,9 @@ local function avoid(from, to)
 				else
 					local ta, tb = (lo - pos) / delta, (hi - pos) / delta
 					if ta > tb then ta, tb = tb, ta end
-					t0, t1 = math.max(t0, ta), math.min(t1, tb)
-					if t0 > t1 then hit = false end
-				end
-			end
-			if hit then
-				local zLow, zHigh = z0 - 2, z1 + 2
-				local z = math.abs(from.Z - zLow) <= math.abs(from.Z - zHigh) and zLow or zHigh
-				if z < -440 or z > -290 then z = z == zLow and zHigh or zLow end
-				local x = math.abs(from.X - x0) <= math.abs(from.X - x1) and x0 or x1
-				if math.abs(from.Z - z) < 3 then
-					x = math.abs(to.X - x0) <= math.abs(to.X - x1) and x0 or x1
-				end
-				return Vector3.new(x, to.Y, z)
-			end
-		end
-	end
-	return to
-	end-- ============================================================
--- ShouyuHub 作り直し版 | PART 3/4
--- 走りロジック（Chilli Hub式・速度1000）
+-- ============================================================
+-- ShouyuHub 完全版 | PART 3/4
+-- 走りロジック（純CFrame移動・検知回避）
 -- ============================================================
 local status = function(text) end
 
@@ -552,7 +524,7 @@ local function runToEgg(uid, egg)
 	r = root()
 	if r then
 		pcall(function()
-			r.AssemblyLinearVelocity = Vector3.new(0, r.AssemblyLinearVelocity.Y, 0)
+			r.AssemblyLinearVelocity = Vector3.zero
 			if humanoid then humanoid:Move(Vector3.zero, false) end
 		end)
 	end
@@ -590,55 +562,42 @@ local function grab(uid, timeout)
 	return state.Carrying and state.Uid == uid
 end
 
------------------------------------------------------------------- 帰る
+------------------------------------------------------------------ 帰る（純CFrame・3段階分割）
 local function runHome(lineX, laneZ)
 	local started = os.clock()
 	local home = homePoint()
 	local checkpoint = lineX - 7
 	local height = CFG.Height
-	local share = math.clamp(CFG.ClimbShare, 0.1, 0.3)
-	local descent = height * math.sqrt(1 - share * share) / share
 	local character = localPlayer.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 	if humanoid then humanoid.PlatformStand = false end
 
 	local r = root()
-	if r and character and height > 0.5 and home.Y + height - 2 > r.Position.Y then
-		pcall(function()
-			character:PivotTo(CFrame.new(Vector3.new(r.Position.X, home.Y + height, r.Position.Z)) * r.CFrame.Rotation)
-			r.AssemblyLinearVelocity = Vector3.zero
-			r.AssemblyAngularVelocity = Vector3.zero
-		end)
+	if not r then return false end
+
+	-- ★ 段階1: その場で上昇（CFrameで直接）
+	if height > 0.5 and home.Y + height - 2 > r.Position.Y then
+		local target = Vector3.new(r.Position.X, home.Y + height, r.Position.Z)
+		local t = os.clock()
+		while os.clock() - t < 1.5 and not state.Cancel do
+			r = root()
+			if not r then return false end
+			local dt = RunService.Heartbeat:Wait()
+			if chilliMove(r, target, CFG.SpeedHome, dt, {}) then break end
+		end
 	end
 
-	local speed = CFG.SpeedHome
-	local last = os.clock()
-	local timeout = 0
+	-- ★ 段階2: チェックポイント経由で水平移動（CFrame）
 	local mark = {}
-	status("Safe zone")
-	while state.Carrying and state.Delivered < started and not state.Cancel and timeout < 25 do
+	local t2 = os.clock()
+	while state.Carrying and state.Delivered < started and not state.Cancel and os.clock() - t2 < 20 do
 		r = root()
 		if not r then return false end
-		local now = os.clock()
-		local dt = math.max(now - last, 1 / 240); last = now; timeout += dt
-
+		local dt = RunService.Heartbeat:Wait()
 		local toHome = r.Position.X <= checkpoint + 2
-		local target = toHome and home or Vector3.new(checkpoint, home.Y, laneZ)
-		if toHome and Vector3.new(home.X - r.Position.X, 0, home.Z - r.Position.Z).Magnitude < 2 then break end
+		local target = toHome and home or Vector3.new(checkpoint, home.Y + height, laneZ)
 		local aim = avoid(r.Position, target)
-		local flat = Vector3.new(aim.X - r.Position.X, 0, aim.Z - r.Position.Z)
-		local remaining = toHome and 0 or math.max(0, r.Position.X - checkpoint)
-		local wantY = home.Y + height
-		if toHome or remaining <= descent then
-			wantY = home.Y + height * math.clamp(remaining / math.max(descent, 1), 0, 1)
-		end
-		local vy = math.clamp((wantY - r.Position.Y) / 0.12, -speed * share, speed * share)
-		local horizontal = math.sqrt(math.max(speed * speed - vy * vy, 0))
-		local v = flat.Magnitude > 0.01 and flat.Unit * math.min(horizontal, flat.Magnitude / 0.05) or Vector3.zero
-		pcall(function()
-			r.AssemblyLinearVelocity = Vector3.new(v.X, vy, v.Z)
-		end)
-		RunService.Heartbeat:Wait()
+		if chilliMove(r, aim, CFG.SpeedHome, dt, mark) and toHome then break end
 	end
 
 	if humanoid then pcall(function() humanoid:Move(Vector3.zero, false) end) end
@@ -735,7 +694,7 @@ function stopAutoSteal()
 		autoStealThread = nil
 	end
 	state.AutoRunning = false
-		end-- ============================================================
+						end-- ============================================================
 -- PART 4/4 - UI
 -- ============================================================
 
@@ -782,7 +741,6 @@ if IS_MOBILE then
     UI.Scale = math.min(vp.X * 0.92 / UI_W, vp.Y * 0.80 / UI_H, 1)
 end
 
--- ==================== メイン ====================
 local main = Instance.new("Frame", gui)
 main.AnchorPoint = Vector2.new(0.5, 0.5)
 main.Size = UDim2.fromOffset(UI_W, UI_H)
@@ -816,7 +774,6 @@ bgG.Color = ColorSequence.new({
     ColorSequenceKeypoint.new(1, Color3.fromRGB(5, 2, 3)),
 })
 
--- ==================== ヘッダー ====================
 local header = Instance.new("Frame", main)
 header.Size = UDim2.new(1, -16, 0, 56)
 header.Position = UDim2.fromOffset(8, 8)
@@ -867,7 +824,7 @@ local sub = Instance.new("TextLabel", header)
 sub.Size = UDim2.new(1, -150, 0, 14)
 sub.Position = UDim2.fromOffset(58, 30)
 sub.BackgroundTransparency = 1
-sub.Text = "STEAL AN EGG - 1000"
+sub.Text = "STEAL AN EGG - 1000 (CFrame)"
 sub.TextColor3 = THEME.TextDim
 sub.Font = Enum.Font.GothamBold
 sub.TextSize = 10
@@ -900,7 +857,6 @@ closeBtn.AutoButtonColor = true
 closeBtn.ZIndex = 6
 Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 8)
 
--- ==================== ボディ ====================
 local body = Instance.new("Frame", main)
 body.Size = UDim2.new(1, -16, 1, -72)
 body.Position = UDim2.fromOffset(8, 72)
@@ -1157,4 +1113,21 @@ end)
 
 shieldStart()
 
-print("[ShouyuHub] 起動完了 / 速度 " .. CFG.SpeedToEgg)
+print("[ShouyuHub] 起動完了 / CFrame移動 / 速度 " .. CFG.SpeedToEgg)					t0, t1 = math.max(t0, ta), math.min(t1, tb)
+					if t0 > t1 then hit = false end
+				end
+			end
+			if hit then
+				local zLow, zHigh = z0 - 2, z1 + 2
+				local z = math.abs(from.Z - zLow) <= math.abs(from.Z - zHigh) and zLow or zHigh
+				if z < -440 or z > -290 then z = z == zLow and zHigh or zLow end
+				local x = math.abs(from.X - x0) <= math.abs(from.X - x1) and x0 or x1
+				if math.abs(from.Z - z) < 3 then
+					x = math.abs(to.X - x0) <= math.abs(to.X - x1) and x0 or x1
+				end
+				return Vector3.new(x, to.Y, z)
+			end
+		end
+	end
+	return to
+	end
