@@ -1031,32 +1031,23 @@ local function stealAndDeliver(uid)
 		state.Busy = false
 	end)
 				end-- ============================================================
--- ============================================================
--- PART 6/6 - ShouyuHub UI (Delta対応版)
+					-- ============================================================
+-- PART 4/4 - UI（自作）
 -- ============================================================
 
 print("[ShouyuHub] UI構築開始")
 
-local IS_MOBILE = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
-local THEME = {
-	Bg          = Color3.fromRGB(18, 6, 8),
-	Panel       = Color3.fromRGB(28, 8, 12),
-	Card        = Color3.fromRGB(34, 10, 14),
-	Accent      = Color3.fromRGB(220, 40, 60),
-	AccentSoft  = Color3.fromRGB(255, 140, 150),
-	AccentDeep  = Color3.fromRGB(90, 12, 22),
-	Text        = Color3.fromRGB(240, 230, 232),
-	TextDim     = Color3.fromRGB(180, 150, 155),
-	Stroke      = Color3.fromRGB(80, 30, 40),
-}
-local AUTO_REFRESH = 4
-
 local UI = { W = 340, H = 500, Scale = 1, Minimized = false }
 local UI_W, UI_H, UI_H_MIN = UI.W, UI.H, 68
 
--- ★ Delta対応: PlayerGui を直接使う
 local function getParent()
-    return localPlayer:WaitForChild("PlayerGui")
+    if type(gethui) == "function" then
+        local ok, r = pcall(gethui)
+        if ok and typeof(r) == "Instance" then return r end
+    end
+    local ok, cg = pcall(function() return game:GetService("CoreGui") end)
+    if ok and cg then return cg end
+    return localPlayer:FindFirstChildOfClass("PlayerGui")
 end
 
 local gui = Instance.new("ScreenGui")
@@ -1067,7 +1058,19 @@ gui.DisplayOrder = 999999
 gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 gui.Enabled = true
 
-gui.Parent = getParent()
+if type(syn) == "table" and type(syn.protect_gui) == "function" then
+    pcall(syn.protect_gui, gui)
+end
+
+local parent = getParent()
+if parent then
+    local ok = pcall(function() gui.Parent = parent end)
+    if not ok or not gui.Parent then
+        local pg = localPlayer:WaitForChild("PlayerGui", 5)
+        if pg then gui.Parent = pg end
+    end
+end
+
 print("[ShouyuHub] GUI Parent:", gui.Parent and gui.Parent:GetFullName() or "nil")
 
 local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1280, 720)
@@ -1075,6 +1078,7 @@ if IS_MOBILE then
     UI.Scale = math.min(vp.X * 0.92 / UI_W, vp.Y * 0.80 / UI_H, 1)
 end
 
+-- ==================== メイン ====================
 local main = Instance.new("Frame", gui)
 main.AnchorPoint = Vector2.new(0.5, 0.5)
 main.Size = UDim2.fromOffset(UI_W, UI_H)
@@ -1093,6 +1097,7 @@ stroke.Color = THEME.Accent
 stroke.Thickness = 1.5
 stroke.Transparency = 0.25
 
+-- 背景
 local bg = Instance.new("Frame", main)
 bg.Size = UDim2.fromScale(1, 1)
 bg.BackgroundColor3 = THEME.AccentDeep
@@ -1108,6 +1113,7 @@ bgG.Color = ColorSequence.new({
     ColorSequenceKeypoint.new(1, Color3.fromRGB(5, 2, 3)),
 })
 
+-- ==================== ヘッダー ====================
 local header = Instance.new("Frame", main)
 header.Size = UDim2.new(1, -16, 0, 56)
 header.Position = UDim2.fromOffset(8, 8)
@@ -1122,6 +1128,7 @@ hS.Color = Color3.fromRGB(120, 12, 20)
 hS.Thickness = 1.2
 hS.Transparency = 0.35
 
+-- ★ キャラパネル（アバターヘッドショット）
 local avatarFrame = Instance.new("Frame", header)
 avatarFrame.Size = UDim2.fromOffset(40, 40)
 avatarFrame.Position = UDim2.fromOffset(8, 8)
@@ -1143,6 +1150,7 @@ avatarImg.Image = "rbxthumb://type=AvatarHeadShot&id=" .. localPlayer.UserId .. 
 avatarImg.ZIndex = 7
 Instance.new("UICorner", avatarImg).CornerRadius = UDim.new(1, 0)
 
+-- タイトル
 local title = Instance.new("TextLabel", header)
 title.Size = UDim2.new(1, -150, 0, 22)
 title.Position = UDim2.fromOffset(58, 8)
@@ -1158,13 +1166,14 @@ local sub = Instance.new("TextLabel", header)
 sub.Size = UDim2.new(1, -150, 0, 14)
 sub.Position = UDim2.fromOffset(58, 30)
 sub.BackgroundTransparency = 1
-sub.Text = "STEAL AN EGG - " .. tostring(CFG.SpeedToEgg)
+sub.Text = "STEAL AN EGG - 1500"
 sub.TextColor3 = THEME.TextDim
 sub.Font = Enum.Font.GothamBold
 sub.TextSize = 10
 sub.TextXAlignment = Enum.TextXAlignment.Left
 sub.ZIndex = 6
 
+-- 最小化
 local minBtn = Instance.new("TextButton", header)
 minBtn.Size = UDim2.fromOffset(32, 32)
 minBtn.Position = UDim2.new(1, -78, 0.5, -16)
@@ -1178,6 +1187,7 @@ minBtn.AutoButtonColor = true
 minBtn.ZIndex = 6
 Instance.new("UICorner", minBtn).CornerRadius = UDim.new(0, 8)
 
+-- 閉じる
 local closeBtn = Instance.new("TextButton", header)
 closeBtn.Size = UDim2.fromOffset(32, 32)
 closeBtn.Position = UDim2.new(1, -42, 0.5, -16)
@@ -1191,23 +1201,26 @@ closeBtn.AutoButtonColor = true
 closeBtn.ZIndex = 6
 Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 8)
 
+-- ==================== ボディ ====================
 local body = Instance.new("Frame", main)
 body.Size = UDim2.new(1, -16, 1, -72)
 body.Position = UDim2.fromOffset(8, 72)
 body.BackgroundTransparency = 1
 body.ZIndex = 5
 
+-- ステータス
 local status = Instance.new("TextLabel", body)
 status.Size = UDim2.new(1, -110, 0, 22)
 status.Position = UDim2.fromOffset(6, 0)
 status.BackgroundTransparency = 1
-status.Text = "速度: " .. CFG.SpeedToEgg .. " / 待機中"
+status.Text = "速度: " .. CFG.Speed .. " / 待機中"
 status.TextColor3 = THEME.TextDim
 status.Font = Enum.Font.GothamMedium
 status.TextSize = 12
 status.TextXAlignment = Enum.TextXAlignment.Left
 status.ZIndex = 6
 
+-- 卵リスト
 local list = Instance.new("ScrollingFrame", body)
 list.Size = UDim2.new(1, -4, 1, -150)
 list.Position = UDim2.fromOffset(2, 26)
@@ -1231,6 +1244,7 @@ lPad.PaddingBottom = UDim.new(0, 6)
 lPad.PaddingLeft = UDim.new(0, 6)
 lPad.PaddingRight = UDim.new(0, 8)
 
+-- 卵リスト構築
 local RARITY_COLORS = {
     Color3.fromRGB(190, 190, 190), Color3.fromRGB(110, 210, 110),
     Color3.fromRGB(90, 160, 255), Color3.fromRGB(190, 110, 255),
@@ -1263,7 +1277,9 @@ local function rebuild()
     if ok and type(records) == "table" then
         for _, record in ipairs(records) do
             local okD, info = pcall(describe, record)
-            if okD and info then infos[#infos + 1] = info end
+            if okD and info then
+                infos[#infos + 1] = info
+            end
         end
     end
     table.sort(infos, function(a, b) return (a.Value or 0) > (b.Value or 0) end)
@@ -1325,6 +1341,7 @@ local function rebuild()
     setSelected(still and selectedUid or nil)
 end
 
+-- ==================== ボタン ====================
 local function mkBtn(text, pos, size, color)
     local b = Instance.new("TextButton", body)
     b.Size = size
@@ -1345,8 +1362,9 @@ local function mkBtn(text, pos, size, color)
     return b
 end
 
-local refreshBtn = mkBtn("更新", UDim2.new(0, 0, 1, -112), UDim2.new(1, -4, 0, 48), THEME.Card)
-local instantBtn = mkBtn("即盗み", UDim2.new(0, 0, 1, -60), UDim2.new(1, -4, 0, 56), Color3.fromRGB(40, 10, 25))
+local refreshBtn = mkBtn("更新", UDim2.new(0, 0, 1, -60), UDim2.new(0.32, -4, 0, 52), THEME.Card)
+local autoBtn = mkBtn("自動盗み", UDim2.new(0.32, 2, 1, -60), UDim2.new(0.36, -4, 0, 52), Color3.fromRGB(60, 15, 20))
+local instantBtn = mkBtn("即盗み", UDim2.new(0.68, 4, 1, -60), UDim2.new(0.32, -4, 0, 52), Color3.fromRGB(40, 10, 25))
 
 refreshBtn.MouseButton1Click:Connect(function()
     if not state.Busy then
@@ -1355,13 +1373,23 @@ refreshBtn.MouseButton1Click:Connect(function()
     end
 end)
 
-instantBtn.MouseButton1Click:Connect(function()
-    if state.Busy then
-        state.Cancel = true
-        status.Text = "キャンセル中..."
-        return
+autoBtn.MouseButton1Click:Connect(function()
+    if state.AutoEnabled then
+        stopAutoSteal()
+        autoBtn.Text = "自動盗み"
+        autoBtn.BackgroundColor3 = Color3.fromRGB(60, 15, 20)
+        status.Text = "自動盗み停止"
+    else
+        startAutoSteal()
+        autoBtn.Text = "停止"
+        autoBtn.BackgroundColor3 = Color3.fromRGB(140, 20, 30)
+        status.Text = "自動盗み開始"
     end
+end)
+
+instantBtn.MouseButton1Click:Connect(function()
     if selectedUid then
+        state.Busy = false
         stealAndDeliver(selectedUid)
         status.Text = "即盗み実行中..."
     else
@@ -1369,6 +1397,7 @@ instantBtn.MouseButton1Click:Connect(function()
     end
 end)
 
+-- 最小化
 minBtn.MouseButton1Click:Connect(function()
     UI.Minimized = not UI.Minimized
     if UI.Minimized then
@@ -1380,13 +1409,9 @@ minBtn.MouseButton1Click:Connect(function()
     end
 end)
 
-closeBtn.MouseButton1Click:Connect(function()
-    state.Cancel = true
-    fpsOff()
-    shieldStop()
-    gui.Enabled = false
-end)
+closeBtn.MouseButton1Click:Connect(function() gui.Enabled = false end)
 
+-- ドラッグ
 local drag, dragStart, startPos = false, nil, nil
 header.InputBegan:Connect(function(input)
     if input.UserInputType == Enum.UserInputType.MouseButton1
@@ -1412,20 +1437,22 @@ UserInputService.InputChanged:Connect(function(input)
         startPos.Y.Scale, startPos.Y.Offset + d.Y)
 end)
 
+-- 自動更新
 task.spawn(function()
     while gui.Parent do
-        task.wait(AUTO_REFRESH)
-        if not state.Busy then
+        task.wait(CFG.AutoRefresh)
+        if not state.Busy and not state.AutoEnabled then
             pcall(rebuild)
         end
     end
 end)
 
+-- ボタン状態監視
 task.spawn(function()
     while gui.Parent do
         task.wait(0.3)
         if state.Busy then
-            instantBtn.Text = "キャンセル"
+            instantBtn.Text = "実行中..."
             instantBtn.BackgroundColor3 = Color3.fromRGB(80, 30, 30)
         else
             instantBtn.Text = "即盗み"
@@ -1439,6 +1466,4 @@ task.spawn(function()
     pcall(rebuild)
 end)
 
-shieldStart()
-
-print("[ShouyuHub] 起動完了 / 速度 " .. CFG.SpeedToEgg)
+print("[ShouyuHub] 起動完了 / 速度 " .. CFG.Speed)
