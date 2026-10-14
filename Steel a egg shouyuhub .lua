@@ -611,7 +611,7 @@ local function runHome(lineX, laneZ)
 	end
 
 	-- ★ 帰り速度 250
-	local speed = CFG.SpeedHome
+	local speed = 250
 	local last = os.clock()
 	local timeout = 0
 	status("Safe zone")
