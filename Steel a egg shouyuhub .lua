@@ -1,26 +1,39 @@
 -- ============================================================
--- 修正版 | PART 1/4
--- 初期化・設定・ゲームハンドル・シールド
--- 行き1850 / 帰り250
+-- ShouyuHub 作り直し版 | PART 1/4
+-- 初期化・設定・シールド
+-- 速度1000 (Chilli Hub式: Velocity + CFrameフォールバック)
 -- ============================================================
 local Players           = game:GetService("Players")
 local RunService        = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local UserInputService  = game:GetService("UserInputService")
+local TweenService      = game:GetService("TweenService")
 local CoreGui           = game:GetService("CoreGui")
 local localPlayer       = Players.LocalPlayer
+local IS_MOBILE         = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
 
------------------------------------------------------------------- 設定
 local CFG = {
-	SpeedToEgg = 1850,    -- ★ 行き速度
-	SpeedHome  = 250,     -- ★ 帰り速度
-	GrabInterval = 0.03,
-	RegrabFar = 40,
-	Height = 70,
-	ClimbShare = 0.5,
+	SpeedToEgg    = 1000,   -- ★ 行き
+	SpeedHome     = 500,    -- ★ 帰り
+	GrabInterval  = 0.03,
+	RegrabFar     = 40,
+	Height        = 70,
+	ClimbShare    = 0.5,
+	AutoRefresh   = 4,
 }
 
------------------------------------------------------------------- ゲームハンドル
+local THEME = {
+	Bg          = Color3.fromRGB(18, 6, 8),
+	Panel       = Color3.fromRGB(28, 8, 12),
+	Card        = Color3.fromRGB(34, 10, 14),
+	Accent      = Color3.fromRGB(220, 40, 60),
+	AccentSoft  = Color3.fromRGB(255, 140, 150),
+	AccentDeep  = Color3.fromRGB(90, 12, 22),
+	Text        = Color3.fromRGB(240, 230, 232),
+	TextDim     = Color3.fromRGB(180, 150, 155),
+	Stroke      = Color3.fromRGB(80, 30, 40),
+}
+
 local function safeRequire(getter)
 	local ok, result = pcall(function() return require(getter()) end)
 	return ok and result or nil
@@ -39,16 +52,6 @@ end
 
 ------------------------------------------------------------------ シールド（Humanoid Swap）
 local shield = { Original = nil, Clone = nil, Links = {}, Connection = nil, Added = nil }
-
-local function walkSpeed()
-	local character = localPlayer.Character
-	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-	local speed = humanoid and humanoid.WalkSpeed or 16
-	if shield.Original and shield.Original.Health > 0 then
-		speed = math.min(speed, shield.Original.WalkSpeed)
-	end
-	return speed
-end
 
 local function shieldControls(humanoid)
 	pcall(function()
@@ -189,13 +192,14 @@ local function shieldStop()
 	if shield.Added then shield.Added:Disconnect(); shield.Added = nil end
 	shieldUndo()
 end-- ============================================================
--- 修正版 | PART 2/4
--- ステート・卵情報・スナップショット
+-- ShouyuHub 作り直し版 | PART 2/4
+-- ステート・卵情報・Chilli Hub式移動関数
 -- ============================================================
 local state = {
 	Carrying = false, Uid = nil, Delivered = 0,
 	Busy = false, Cancel = false, Mult = 1,
 	HeldSeen = 0, GuessedDrop = false,
+	AutoEnabled = false, AutoRunning = false,
 }
 
 if type(EggState) == "table" and type(EggState.CarryChanged) == "table" and type(EggState.CarryChanged.Connect) == "function" then
@@ -315,12 +319,10 @@ local function eggNow(uid, cache)
 	return cache.Pos
 end
 
------------------------------------------------------------------- 卵情報
 local function describe(record)
 	local directory = type(Assets) == "table" and Assets.Directory or nil
 	local entry = type(directory) == "table" and directory[tostring(record.AssetCategory)] or nil
 	local info = { Uid = record.Uid, Category = tostring(record.AssetCategory), Name = tostring(record.AssetCategory), Icon = "", Rarity = 0, Value = 0 }
-
 	if type(entry) == "table" then
 		info.Name = tostring(entry.DisplayName or record.AssetCategory)
 		local icon = entry.Icon
@@ -351,7 +353,6 @@ local function money(value)
 	return string.format("$%d/s", math.floor(value + 0.5))
 end
 
------------------------------------------------------------------- 地形ヘルパー
 local function lineInfo()
 	local world = workspace:FindFirstChild("World") or workspace:FindFirstChild("__OBJECTS")
 	world = world and world:FindFirstChild("Areas")
@@ -373,19 +374,46 @@ local function homePoint()
 	return Vector3.new(528.7, 70.57, -364.11)
 end
 
-local function groundY(position, fallback)
-	local y = fallback
-	pcall(function()
-		local params = RaycastParams.new()
-		params.FilterType = Enum.RaycastFilterType.Exclude
-		params.FilterDescendantsInstances = { localPlayer.Character }
-		params.IgnoreWater = true
-		local hit = workspace:Raycast(position + Vector3.new(0, 60, 0), Vector3.new(0, -140, 0), params)
-		if hit and hit.Material ~= Enum.Material.Water and math.abs(hit.Position.Y - fallback) < 40 then
-			y = hit.Position.Y + 3.5
+------------------------------------------------------------------ ★ Chilli Hub式移動関数
+-- Velocity + CFrameフォールバック（スタック時のみ瞬間移動）
+local function chilliMove(r, target, speed, dt, mark)
+	local delta = target - r.Position
+	local magnitude = delta.Magnitude
+	local n = math.max(dt, 0.0041666666666666666)
+	local v = Vector3.zero
+
+	if magnitude > 0.01 then
+		v = delta.Unit * math.min(speed, magnitude / n)
+	end
+
+	local vel = v + Vector3.new(0, workspace.Gravity * n * 0.5, 0)
+
+	-- ★ CFrameフォールバック（0.4秒ごとにスタック判定）
+	if magnitude > 2 then
+		if not mark.mark then
+			mark.mark = magnitude
+			mark.clock = 0
 		end
+		mark.clock = mark.clock + dt
+		if mark.clock >= 0.4 then
+			if mark.mark - magnitude < speed * 0.1 then
+				pcall(function()
+					r.CFrame = r.CFrame + delta.Unit * math.min(magnitude, speed * n)
+				end)
+			end
+			mark.mark = magnitude
+			mark.clock = 0
+		end
+	else
+		mark.mark = nil
+	end
+
+	pcall(function()
+		r.AssemblyLinearVelocity = vel
+		r.AssemblyAngularVelocity = Vector3.zero
 	end)
-	return y
+
+	return magnitude <= 0.5
 end
 
 ------------------------------------------------------------------ 危険地帯回避
@@ -463,13 +491,12 @@ local function avoid(from, to)
 	end
 	return to
 	end-- ============================================================
--- 修正版 | PART 3/4
--- 走りロジック（卵へ→グラブ→帰る）+ stealAndDeliver
--- 行き1850 / 帰り250
+-- ShouyuHub 作り直し版 | PART 3/4
+-- 走りロジック（Chilli Hub式・速度1000）
 -- ============================================================
 local status = function(text) end
 
------------------------------------------------------------------- 卵へ走る（行き1850）
+------------------------------------------------------------------ 卵へ走る
 local function runToEgg(uid, egg)
 	local lineX = lineInfo()
 	local home  = homePoint()
@@ -490,6 +517,7 @@ local function runToEgg(uid, egg)
 	end
 
 	local started, lastCheck, lastPos, lastTake = os.clock(), os.clock(), r.Position, 0
+	local mark = {}
 	while os.clock() - started < 120 and not state.Cancel do
 		r = root()
 		if not r then return false end
@@ -505,14 +533,8 @@ local function runToEgg(uid, egg)
 		end
 
 		local waypoint = avoid(r.Position, target)
-		local flat = Vector3.new(waypoint.X - r.Position.X, 0, waypoint.Z - r.Position.Z)
-		local unit = flat.Magnitude > 0.01 and flat.Unit or Vector3.zero
-		-- ★ 行き速度 1850
-		local v = unit * math.min(CFG.SpeedToEgg, flat.Magnitude / 0.25)
-		pcall(function()
-			r.AssemblyLinearVelocity = Vector3.new(v.X, r.AssemblyLinearVelocity.Y, v.Z)
-			if humanoid and unit.Magnitude > 0 then humanoid:Move(unit, false) end
-		end)
+		local dt = RunService.Heartbeat:Wait()
+		chilliMove(r, waypoint, CFG.SpeedToEgg, dt, mark)
 
 		if os.clock() - lastCheck >= 1.5 then
 			if (r.Position - lastPos).Magnitude < 3 and humanoid and flatEgg.Magnitude > 15 then
@@ -525,7 +547,6 @@ local function runToEgg(uid, egg)
 			lastTake = os.clock()
 			takeEgg(uid)
 		end
-		RunService.Heartbeat:Wait()
 	end
 
 	r = root()
@@ -538,26 +559,18 @@ local function runToEgg(uid, egg)
 	return state.Carrying or (r ~= nil and Vector3.new(egg.X - r.Position.X, 0, egg.Z - r.Position.Z).Magnitude <= 6)
 end
 
------------------------------------------------------------------- グラブ（接近1850）
+------------------------------------------------------------------ グラブ
 local function grab(uid, timeout)
 	local cache = { At = 0 }
 	local waited, since = 0, 1
+	local mark = {}
 	while not state.Carrying and waited < timeout and not state.Cancel do
 		local r = root()
 		local egg = eggNow(uid, cache)
 		local dt = math.max(RunService.Heartbeat:Wait(), 1 / 240)
 		waited += dt; since += dt
 		if r and egg then
-			local delta = egg - r.Position
-			if delta.Magnitude > 2 then
-				-- ★ 接近速度 1850
-				local v = delta / math.max(0.55, dt)
-				if v.Magnitude > CFG.SpeedToEgg then v = v.Unit * CFG.SpeedToEgg end
-				pcall(function()
-					r.AssemblyLinearVelocity = v + Vector3.new(0, workspace.Gravity * dt * 0.5, 0)
-					r.AssemblyAngularVelocity = Vector3.zero
-				end)
-			end
+			chilliMove(r, egg, CFG.SpeedToEgg, dt, mark)
 			if since >= CFG.GrabInterval then
 				since = 0
 				local prompt = promptNear(egg - Vector3.new(0, 3, 0), 10)
@@ -577,19 +590,7 @@ local function grab(uid, timeout)
 	return state.Carrying and state.Uid == uid
 end
 
-local function regrab(uid)
-	if state.Carrying then return true end
-	local r = root()
-	local egg = eggPosition(uid)
-	if r and egg and Vector3.new(r.Position.X - egg.X, 0, r.Position.Z - egg.Z).Magnitude > CFG.RegrabFar then
-		status("The egg fell far behind, going back to it")
-	else
-		status("The egg fell close, taking it back")
-	end
-	return grab(uid, 5)
-end
-
------------------------------------------------------------------- 帰る（帰り250）
+------------------------------------------------------------------ 帰る
 local function runHome(lineX, laneZ)
 	local started = os.clock()
 	local home = homePoint()
@@ -610,10 +611,10 @@ local function runHome(lineX, laneZ)
 		end)
 	end
 
-	-- ★ 帰り速度 280
-	local speed = 280
+	local speed = CFG.SpeedHome
 	local last = os.clock()
 	local timeout = 0
+	local mark = {}
 	status("Safe zone")
 	while state.Carrying and state.Delivered < started and not state.Cancel and timeout < 25 do
 		r = root()
@@ -696,342 +697,464 @@ local function stealAndDeliver(uid)
 		state.Busy = false
 	end)
 end
--- ★ 余分な end を削除（ここがUI非表示の原因だった）-- ============================================================
--- 修正版 | PART 4/4
--- UI（yslemStyle）— PlayerGui優先 + Enabled=true
--- ============================================================
-local WHITE  = Color3.fromRGB(255, 255, 255)
-local SILVER = Color3.fromRGB(150, 150, 156)
-local STEEL  = Color3.fromRGB(70, 70, 76)
-local BG     = Color3.fromRGB(0, 0, 0)
-local RARITY_COLORS = {
-	Color3.fromRGB(190, 190, 190), Color3.fromRGB(110, 210, 110), Color3.fromRGB(90, 160, 255),
-	Color3.fromRGB(190, 110, 255), Color3.fromRGB(255, 170, 50), Color3.fromRGB(255, 80, 80),
-	Color3.fromRGB(255, 90, 200), Color3.fromRGB(80, 235, 235),
-}
 
--- ★ PlayerGui優先に変更
-local function parentGui()
-	local playerGui = localPlayer:FindFirstChild("PlayerGui")
-	if playerGui then return playerGui end
-	if typeof(gethui) == "function" then
-		local ok, result = pcall(gethui)
-		if ok and typeof(result) == "Instance" then return result end
-	end
-	return CoreGui
-end
+------------------------------------------------------------------ 自動盗みループ
+local autoStealThread = nil
 
-local function make(class, props)
-	local inst = Instance.new(class)
-	for k, v in pairs(props or {}) do inst[k] = v end
-	return inst
-end
-
-local function corner(parent, radius)
-	make("UICorner", { CornerRadius = UDim.new(0, radius or 6) }).Parent = parent
-end
-
-local living = {}
-local function bands(a, b)
-	return ColorSequence.new({
-		ColorSequenceKeypoint.new(0, a), ColorSequenceKeypoint.new(0.25, b),
-		ColorSequenceKeypoint.new(0.5, a), ColorSequenceKeypoint.new(0.75, b),
-		ColorSequenceKeypoint.new(1, a),
-	})
-end
-
-local function livingStroke(parent, thickness, bright)
-	local s = make("UIStroke", { Thickness = thickness or 1, Color = WHITE, ApplyStrokeMode = Enum.ApplyStrokeMode.Border })
-	s.Parent = parent
-	local g = make("UIGradient", { Rotation = 45, Color = bands(bright and WHITE or SILVER, STEEL) })
-	g.Parent = s
-	living[#living + 1] = g
-	return s, g
-end
-
-local function livingText(label)
-	local g = make("UIGradient", { Color = bands(WHITE, SILVER) })
-	g.Parent = label
-	living[#living + 1] = g
-	return g
-end
-
-local function text(parent, props)
-	local alive = props.Living ~= false
-	props.Living = nil
-	props.BackgroundTransparency = 1
-	props.TextColor3 = props.TextColor3 or WHITE
-	local l = make("TextLabel", props)
-	l.Parent = parent
-	if alive then livingText(l) end
-	return l
-end
-
-local old = parentGui():FindFirstChild("yslemEgg")
-if old then old:Destroy() end
-
--- ★ Enabled = true を追加
-local gui = make("ScreenGui", {
-	Name = "yslemEgg",
-	ResetOnSpawn = false,
-	ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
-	IgnoreGuiInset = true,
-	Enabled = true,
-	DisplayOrder = 999999,
-})
-gui.Parent = parentGui()
-
-local W, H, HEADER = 158, 188, 20
-local window = make("Frame", {
-	Size = UDim2.fromOffset(W, H),
-	Position = UDim2.new(0.5, -W / 2, 0.5, -H / 2),
-	BackgroundColor3 = BG, BorderSizePixel = 0, ClipsDescendants = false,
-})
-window.Parent = gui
-corner(window, 18)
-livingStroke(window, 1, true)
-
-local rotation = 0
-local tick = 0
-local shineConnection = RunService.Heartbeat:Connect(function(dt)
-	tick += 1
-	if tick % 2 ~= 0 then return end
-	rotation = (rotation + dt * 72) % 360
-	for _, g in ipairs(living) do
-		if g.Parent then
-			g.Rotation = g.Parent:IsA("UIStroke") and (45 + rotation) % 360 or rotation
+function startAutoSteal()
+	if state.AutoRunning then return end
+	state.AutoEnabled = true
+	state.AutoRunning = true
+	autoStealThread = task.spawn(function()
+		while state.AutoEnabled do
+			if not state.Busy then
+				local records = snapshot()
+				local best, bestInfo = nil, nil
+				for _, record in ipairs(records) do
+					local info = describe(record)
+					if not bestInfo or info.Value > bestInfo.Value then
+						best, bestInfo = record, info
+					end
+				end
+				if best then
+					status("Auto: " .. bestInfo.Name)
+					stealAndDeliver(best.Uid)
+				end
+			end
+			task.wait(1.5)
 		end
+		state.AutoRunning = false
+	end)
+end
+
+function stopAutoSteal()
+	state.AutoEnabled = false
+	state.Cancel = true
+	if autoStealThread then
+		pcall(task.cancel, autoStealThread)
+		autoStealThread = nil
 	end
-end)
+	state.AutoRunning = false
+		end-- ============================================================
+-- PART 4/4 - UI
+-- ============================================================
 
-local header = make("Frame", {
-	Size = UDim2.new(1, -8, 0, HEADER - 4),
-	Position = UDim2.fromOffset(4, 4),
-	BackgroundColor3 = WHITE, BorderSizePixel = 0,
-})
-header.Parent = window
-corner(header, 10)
-do
-	local g = make("UIGradient", { Color = bands(WHITE, SILVER) })
-	g.Parent = header
-	living[#living + 1] = g
+print("[ShouyuHub] UI構築開始")
+
+local UI = { W = 340, H = 500, Scale = 1, Minimized = false }
+local UI_W, UI_H, UI_H_MIN = UI.W, UI.H, 68
+
+local function getParent()
+    if type(gethui) == "function" then
+        local ok, r = pcall(gethui)
+        if ok and typeof(r) == "Instance" then return r end
+    end
+    local ok, cg = pcall(function() return game:GetService("CoreGui") end)
+    if ok and cg then return cg end
+    return localPlayer:FindFirstChildOfClass("PlayerGui")
 end
-text(header, {
-	Size = UDim2.new(1, -44, 1, 0), Position = UDim2.fromOffset(6, 0),
-	Font = Enum.Font.GothamBlack, TextSize = 10,
-	TextColor3 = Color3.new(0, 0, 0),
-	TextXAlignment = Enum.TextXAlignment.Left,
-	Text = "yslemEgg 1850/250",
-	Living = false,
-})
 
-local function headerButton(label, offset)
-	local b = make("TextButton", {
-		Size = UDim2.fromOffset(17, 14),
-		Position = UDim2.new(1, offset, 0.5, -7),
-		BackgroundColor3 = BG,
-		Font = Enum.Font.GothamBold, TextSize = 10, TextColor3 = WHITE,
-		Text = label, AutoButtonColor = true,
-	})
-	b.Parent = header
-	corner(b, 7)
-	livingStroke(b, 1, true)
-	livingText(b)
-	return b
+local gui = Instance.new("ScreenGui")
+gui.Name = "ShouyuHub_" .. tostring(math.random(1000, 9999))
+gui.ResetOnSpawn = false
+gui.IgnoreGuiInset = true
+gui.DisplayOrder = 999999
+gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+gui.Enabled = true
+
+if type(syn) == "table" and type(syn.protect_gui) == "function" then
+    pcall(syn.protect_gui, gui)
 end
-local minimize = headerButton("-", -39)
-local close    = headerButton("x", -20)
 
-local body = make("Frame", {
-	Size = UDim2.new(1, -10, 1, -(HEADER + 8)),
-	Position = UDim2.fromOffset(5, HEADER + 4),
-	BackgroundTransparency = 1,
+local parent = getParent()
+if parent then
+    local ok = pcall(function() gui.Parent = parent end)
+    if not ok or not gui.Parent then
+        local pg = localPlayer:WaitForChild("PlayerGui", 5)
+        if pg then gui.Parent = pg end
+    end
+end
+
+print("[ShouyuHub] GUI Parent:", gui.Parent and gui.Parent:GetFullName() or "nil")
+
+local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1280, 720)
+if IS_MOBILE then
+    UI.Scale = math.min(vp.X * 0.92 / UI_W, vp.Y * 0.80 / UI_H, 1)
+end
+
+-- ==================== メイン ====================
+local main = Instance.new("Frame", gui)
+main.AnchorPoint = Vector2.new(0.5, 0.5)
+main.Size = UDim2.fromOffset(UI_W, UI_H)
+main.Position = UDim2.new(0.5, 0, 0.5, 0)
+main.BackgroundColor3 = THEME.Bg
+main.BorderSizePixel = 0
+main.Active = true
+main.ClipsDescendants = true
+
+local us = Instance.new("UIScale", main)
+us.Scale = UI.Scale
+
+Instance.new("UICorner", main).CornerRadius = UDim.new(0, 14)
+local stroke = Instance.new("UIStroke", main)
+stroke.Color = THEME.Accent
+stroke.Thickness = 1.5
+stroke.Transparency = 0.25
+
+local bg = Instance.new("Frame", main)
+bg.Size = UDim2.fromScale(1, 1)
+bg.BackgroundColor3 = THEME.AccentDeep
+bg.BackgroundTransparency = 0.7
+bg.BorderSizePixel = 0
+bg.ZIndex = 1
+Instance.new("UICorner", bg).CornerRadius = UDim.new(0, 14)
+local bgG = Instance.new("UIGradient", bg)
+bgG.Rotation = 90
+bgG.Color = ColorSequence.new({
+    ColorSequenceKeypoint.new(0, THEME.AccentDeep),
+    ColorSequenceKeypoint.new(0.5, THEME.Bg),
+    ColorSequenceKeypoint.new(1, Color3.fromRGB(5, 2, 3)),
 })
-body.Parent = window
 
-local list = make("ScrollingFrame", {
-	Size = UDim2.new(1, 0, 1, -58),
-	BackgroundColor3 = BG, BorderSizePixel = 0,
-	ScrollBarThickness = 2, ScrollBarImageColor3 = SILVER,
-	CanvasSize = UDim2.new(), AutomaticCanvasSize = Enum.AutomaticSize.Y,
-})
-list.Parent = body
-corner(list, 12)
-livingStroke(list, 1, false)
-make("UIListLayout", { Padding = UDim.new(0, 3), SortOrder = Enum.SortOrder.LayoutOrder }).Parent = list
-make("UIPadding", { PaddingTop = UDim.new(0, 5), PaddingBottom = UDim.new(0, 5),
-	PaddingLeft = UDim.new(0, 5), PaddingRight = UDim.new(0, 6) }).Parent = list
+-- ==================== ヘッダー ====================
+local header = Instance.new("Frame", main)
+header.Size = UDim2.new(1, -16, 0, 56)
+header.Position = UDim2.fromOffset(8, 8)
+header.BackgroundColor3 = THEME.Panel
+header.BackgroundTransparency = 0.05
+header.BorderSizePixel = 0
+header.ZIndex = 5
+Instance.new("UICorner", header).CornerRadius = UDim.new(0, 10)
 
-local statusLabel = text(body, {
-	Size = UDim2.new(1, 0, 0, 12), Position = UDim2.new(0, 0, 1, -52),
-	Font = Enum.Font.Gotham, TextSize = 9,
-	TextXAlignment = Enum.TextXAlignment.Left,
-	TextTruncate = Enum.TextTruncate.AtEnd,
-	Text = "Pick a pet",
-})
+local hS = Instance.new("UIStroke", header)
+hS.Color = Color3.fromRGB(120, 12, 20)
+hS.Thickness = 1.2
+hS.Transparency = 0.35
 
-local PUBLIC = {
-	["Pick a pet"] = true, ["Looking for the egg"] = true, ["Going to the egg"] = true,
-	["Taking the egg"] = true, ["Delivered"] = true, ["Delivery failed"] = true,
-	["That egg is gone"] = true, ["Could not reach the egg"] = true,
-	["The egg would not come free"] = true, ["Cancelling"] = true,
+local avatarFrame = Instance.new("Frame", header)
+avatarFrame.Size = UDim2.fromOffset(40, 40)
+avatarFrame.Position = UDim2.fromOffset(8, 8)
+avatarFrame.BackgroundColor3 = THEME.AccentDeep
+avatarFrame.BorderSizePixel = 0
+avatarFrame.ZIndex = 6
+Instance.new("UICorner", avatarFrame).CornerRadius = UDim.new(1, 0)
+
+local avatarStroke = Instance.new("UIStroke", avatarFrame)
+avatarStroke.Color = THEME.Accent
+avatarStroke.Thickness = 1.5
+avatarStroke.Transparency = 0.3
+
+local avatarImg = Instance.new("ImageLabel", avatarFrame)
+avatarImg.Size = UDim2.fromScale(0.88, 0.88)
+avatarImg.Position = UDim2.fromScale(0.06, 0.06)
+avatarImg.BackgroundTransparency = 1
+avatarImg.Image = "rbxthumb://type=AvatarHeadShot&id=" .. localPlayer.UserId .. "&w=150&h=150"
+avatarImg.ZIndex = 7
+Instance.new("UICorner", avatarImg).CornerRadius = UDim.new(1, 0)
+
+local title = Instance.new("TextLabel", header)
+title.Size = UDim2.new(1, -150, 0, 22)
+title.Position = UDim2.fromOffset(58, 8)
+title.BackgroundTransparency = 1
+title.Text = "SHOUYU HUB"
+title.TextColor3 = THEME.AccentSoft
+title.Font = Enum.Font.GothamBlack
+title.TextSize = 16
+title.TextXAlignment = Enum.TextXAlignment.Left
+title.ZIndex = 6
+
+local sub = Instance.new("TextLabel", header)
+sub.Size = UDim2.new(1, -150, 0, 14)
+sub.Position = UDim2.fromOffset(58, 30)
+sub.BackgroundTransparency = 1
+sub.Text = "STEAL AN EGG - 1000"
+sub.TextColor3 = THEME.TextDim
+sub.Font = Enum.Font.GothamBold
+sub.TextSize = 10
+sub.TextXAlignment = Enum.TextXAlignment.Left
+sub.ZIndex = 6
+
+local minBtn = Instance.new("TextButton", header)
+minBtn.Size = UDim2.fromOffset(32, 32)
+minBtn.Position = UDim2.new(1, -78, 0.5, -16)
+minBtn.BackgroundColor3 = THEME.AccentDeep
+minBtn.BorderSizePixel = 0
+minBtn.Text = "−"
+minBtn.TextColor3 = THEME.AccentSoft
+minBtn.Font = Enum.Font.GothamBold
+minBtn.TextSize = 20
+minBtn.AutoButtonColor = true
+minBtn.ZIndex = 6
+Instance.new("UICorner", minBtn).CornerRadius = UDim.new(0, 8)
+
+local closeBtn = Instance.new("TextButton", header)
+closeBtn.Size = UDim2.fromOffset(32, 32)
+closeBtn.Position = UDim2.new(1, -42, 0.5, -16)
+closeBtn.BackgroundColor3 = THEME.AccentDeep
+closeBtn.BorderSizePixel = 0
+closeBtn.Text = "×"
+closeBtn.TextColor3 = THEME.AccentSoft
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.TextSize = 20
+closeBtn.AutoButtonColor = true
+closeBtn.ZIndex = 6
+Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 8)
+
+-- ==================== ボディ ====================
+local body = Instance.new("Frame", main)
+body.Size = UDim2.new(1, -16, 1, -72)
+body.Position = UDim2.fromOffset(8, 72)
+body.BackgroundTransparency = 1
+body.ZIndex = 5
+
+local status = Instance.new("TextLabel", body)
+status.Size = UDim2.new(1, -110, 0, 22)
+status.Position = UDim2.fromOffset(6, 0)
+status.BackgroundTransparency = 1
+status.Text = "速度: " .. CFG.SpeedToEgg .. " / 待機中"
+status.TextColor3 = THEME.TextDim
+status.Font = Enum.Font.GothamMedium
+status.TextSize = 12
+status.TextXAlignment = Enum.TextXAlignment.Left
+status.ZIndex = 6
+
+local list = Instance.new("ScrollingFrame", body)
+list.Size = UDim2.new(1, -4, 1, -150)
+list.Position = UDim2.fromOffset(2, 26)
+list.BackgroundColor3 = THEME.Panel
+list.BackgroundTransparency = 0.15
+list.BorderSizePixel = 0
+list.ScrollBarThickness = 5
+list.ScrollBarImageColor3 = THEME.Accent
+list.CanvasSize = UDim2.new()
+list.AutomaticCanvasSize = Enum.AutomaticSize.Y
+list.ZIndex = 5
+Instance.new("UICorner", list).CornerRadius = UDim.new(0, 10)
+
+local lLayout = Instance.new("UIListLayout", list)
+lLayout.Padding = UDim.new(0, 5)
+lLayout.SortOrder = Enum.SortOrder.LayoutOrder
+
+local lPad = Instance.new("UIPadding", list)
+lPad.PaddingTop = UDim.new(0, 6)
+lPad.PaddingBottom = UDim.new(0, 6)
+lPad.PaddingLeft = UDim.new(0, 6)
+lPad.PaddingRight = UDim.new(0, 8)
+
+local RARITY_COLORS = {
+    Color3.fromRGB(190, 190, 190), Color3.fromRGB(110, 210, 110),
+    Color3.fromRGB(90, 160, 255), Color3.fromRGB(190, 110, 255),
+    Color3.fromRGB(255, 170, 50), Color3.fromRGB(255, 80, 80),
+    Color3.fromRGB(255, 90, 200), Color3.fromRGB(80, 235, 235),
 }
-status = function(msg)
-	msg = tostring(msg)
-	if PUBLIC[msg] or string.sub(msg, 1, 9) == "Selected:" then
-		statusLabel.Text = msg
-	elseif string.sub(msg, 1, 5) == "Error" then
-		statusLabel.Text = "Something went wrong"
-	elseif state.Busy then
-		statusLabel.Text = "Delivering"
-	end
-end
-
-local function bigButton(label, position, size)
-	local b = make("TextButton", {
-		Size = size, Position = position,
-		BackgroundColor3 = BG,
-		Font = Enum.Font.GothamBlack, TextSize = 12, TextColor3 = WHITE,
-		Text = label, AutoButtonColor = true,
-	})
-	b.Parent = body
-	corner(b, 17)
-	livingStroke(b, 1, true)
-	livingText(b)
-	return b
-end
-local refreshButton = bigButton("Refresh", UDim2.new(0, 0, 1, -34),   UDim2.new(0.4, -2, 0, 34))
-local stealButton   = bigButton("Steal",   UDim2.new(0.4, 2, 1, -34), UDim2.new(0.6, -2, 0, 34))
 
 local selectedUid = nil
 local rows = {}
 
 local function setSelected(uid)
-	selectedUid = uid
-	for rowUid, row in pairs(rows) do
-		local on = rowUid == uid
-		row.Stroke.Thickness = on and 1.5 or 1
-		row.Gradient.Color = on and bands(WHITE, STEEL) or bands(STEEL, Color3.fromRGB(30, 30, 34))
-	end
+    selectedUid = uid
+    for rowUid, row in pairs(rows) do
+        local on = rowUid == uid
+        row.Stroke.Thickness = on and 2.5 or 1
+        row.Stroke.Color = on and THEME.Accent or THEME.Stroke
+        row.Stroke.Transparency = on and 0 or 0.6
+        row.Frame.BackgroundColor3 = on and THEME.AccentDeep or THEME.Card
+    end
 end
 
 local function rebuild()
-	for _, row in pairs(rows) do row.Frame:Destroy() end
-	table.clear(rows)
-	for i = #living, 1, -1 do
-		if not living[i].Parent then table.remove(living, i) end
-	end
+    for _, row in pairs(rows) do
+        pcall(function() row.Frame:Destroy() end)
+    end
+    table.clear(rows)
 
-	local infos = {}
-	for _, record in ipairs(snapshot()) do
-		infos[#infos + 1] = describe(record)
-	end
-	table.sort(infos, function(a, b) return a.Value > b.Value end)
+    local infos = {}
+    local ok, records = pcall(snapshot)
+    if ok and type(records) == "table" then
+        for _, record in ipairs(records) do
+            local okD, info = pcall(describe, record)
+            if okD and info then infos[#infos + 1] = info end
+        end
+    end
+    table.sort(infos, function(a, b) return (a.Value or 0) > (b.Value or 0) end)
 
-	local still = false
-	for index, info in ipairs(infos) do
-		still = still or info.Uid == selectedUid
-		local frame = make("TextButton", {
-			Size = UDim2.new(1, 0, 0, 28),
-			BackgroundColor3 = BG, LayoutOrder = index,
-			Text = "", AutoButtonColor = true,
-		})
-		frame.Parent = list
-		corner(frame, 10)
-		local rowStroke, rowGradient = livingStroke(frame, 1, false)
+    local still = false
+    for index, info in ipairs(infos) do
+        still = still or info.Uid == selectedUid
 
-		make("ImageLabel", {
-			Size = UDim2.fromOffset(22, 22), Position = UDim2.fromOffset(3, 3),
-			BackgroundTransparency = 1, Image = info.Icon, ScaleType = Enum.ScaleType.Fit,
-		}).Parent = frame
-		text(frame, {
-			Size = UDim2.new(1, -30, 0, 13), Position = UDim2.fromOffset(28, 2),
-			Font = Enum.Font.GothamBold, TextSize = 10,
-			TextXAlignment = Enum.TextXAlignment.Left, TextTruncate = Enum.TextTruncate.AtEnd,
-			Text = info.Name,
-			TextColor3 = RARITY_COLORS[math.clamp(info.Rarity, 1, #RARITY_COLORS)] or WHITE,
-		})
-		text(frame, {
-			Size = UDim2.new(1, -30, 0, 11), Position = UDim2.fromOffset(28, 15),
-			Font = Enum.Font.GothamMedium, TextSize = 9,
-			TextXAlignment = Enum.TextXAlignment.Left,
-			Text = money(info.Value),
-		})
+        local frame = Instance.new("TextButton", list)
+        frame.Size = UDim2.new(1, 0, 0, 48)
+        frame.BackgroundColor3 = THEME.Card
+        frame.BorderSizePixel = 0
+        frame.Text = ""
+        frame.LayoutOrder = index
+        frame.AutoButtonColor = true
 
-		rows[info.Uid] = { Frame = frame, Stroke = rowStroke, Gradient = rowGradient }
-		frame.MouseButton1Click:Connect(function()
-			setSelected(info.Uid)
-			status("Selected: " .. info.Name)
-		end)
-	end
+        Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 8)
 
-	setSelected(still and selectedUid or nil)
-	if #infos == 0 then status("Pick a pet") end
+        local fS = Instance.new("UIStroke", frame)
+        fS.Color = THEME.Stroke
+        fS.Thickness = 1
+        fS.Transparency = 0.6
+
+        local icon = Instance.new("ImageLabel", frame)
+        icon.Size = UDim2.fromOffset(38, 38)
+        icon.Position = UDim2.fromOffset(5, 5)
+        icon.BackgroundTransparency = 1
+        icon.Image = info.Icon or ""
+        icon.ScaleType = Enum.ScaleType.Fit
+
+        local name = Instance.new("TextLabel", frame)
+        name.Size = UDim2.new(1, -52, 0, 22)
+        name.Position = UDim2.fromOffset(50, 4)
+        name.BackgroundTransparency = 1
+        name.Text = info.Name or "?"
+        name.TextColor3 = RARITY_COLORS[math.clamp(info.Rarity or 1, 1, #RARITY_COLORS)] or THEME.Text
+        name.Font = Enum.Font.GothamBold
+        name.TextSize = 15
+        name.TextXAlignment = Enum.TextXAlignment.Left
+        name.TextTruncate = Enum.TextTruncate.AtEnd
+
+        local value = Instance.new("TextLabel", frame)
+        value.Size = UDim2.new(1, -52, 0, 16)
+        value.Position = UDim2.fromOffset(50, 26)
+        value.BackgroundTransparency = 1
+        value.Text = money(info.Value or 0)
+        value.TextColor3 = THEME.AccentSoft
+        value.Font = Enum.Font.GothamMedium
+        value.TextSize = 13
+        value.TextXAlignment = Enum.TextXAlignment.Left
+
+        rows[info.Uid] = { Frame = frame, Stroke = fS }
+
+        frame.MouseButton1Click:Connect(function()
+            setSelected(info.Uid)
+            status.Text = "選択中: " .. (info.Name or "?")
+        end)
+    end
+    setSelected(still and selectedUid or nil)
 end
 
-refreshButton.MouseButton1Click:Connect(function()
-	if not state.Busy then rebuild() end
+local function mkBtn(text, pos, size, color)
+    local b = Instance.new("TextButton", body)
+    b.Size = size
+    b.Position = pos
+    b.BackgroundColor3 = color
+    b.BorderSizePixel = 0
+    b.Text = text
+    b.TextColor3 = THEME.Text
+    b.Font = Enum.Font.GothamBold
+    b.TextSize = 15
+    b.AutoButtonColor = true
+    b.ZIndex = 6
+    Instance.new("UICorner", b).CornerRadius = UDim.new(0, 12)
+    local s = Instance.new("UIStroke", b)
+    s.Color = THEME.Accent
+    s.Thickness = 1.2
+    s.Transparency = 0.4
+    return b
+end
+
+local refreshBtn = mkBtn("更新", UDim2.new(0, 0, 1, -60), UDim2.new(0.32, -4, 0, 52), THEME.Card)
+local autoBtn = mkBtn("自動盗み", UDim2.new(0.32, 2, 1, -60), UDim2.new(0.36, -4, 0, 52), Color3.fromRGB(60, 15, 20))
+local instantBtn = mkBtn("即盗み", UDim2.new(0.68, 4, 1, -60), UDim2.new(0.32, -4, 0, 52), Color3.fromRGB(40, 10, 25))
+
+refreshBtn.MouseButton1Click:Connect(function()
+    if not state.Busy then
+        rebuild()
+        status.Text = "更新完了"
+    end
 end)
 
-stealButton.MouseButton1Click:Connect(function()
-	if state.Busy then
-		state.Cancel = true
-		status("Cancelling")
-		return
-	end
-	if not selectedUid then status("Pick a pet"); return end
-	stealAndDeliver(selectedUid)
+autoBtn.MouseButton1Click:Connect(function()
+    if state.AutoEnabled then
+        stopAutoSteal()
+        autoBtn.Text = "自動盗み"
+        autoBtn.BackgroundColor3 = Color3.fromRGB(60, 15, 20)
+        status.Text = "自動盗み停止"
+    else
+        startAutoSteal()
+        autoBtn.Text = "停止"
+        autoBtn.BackgroundColor3 = Color3.fromRGB(140, 20, 30)
+        status.Text = "自動盗み開始"
+    end
+end)
+
+instantBtn.MouseButton1Click:Connect(function()
+    if selectedUid then
+        state.Busy = false
+        stealAndDeliver(selectedUid)
+        status.Text = "即盗み実行中..."
+    else
+        status.Text = "卵を選択してください"
+    end
+end)
+
+minBtn.MouseButton1Click:Connect(function()
+    UI.Minimized = not UI.Minimized
+    if UI.Minimized then
+        TweenService:Create(main, TweenInfo.new(0.25), {Size = UDim2.fromOffset(UI_W, UI_H_MIN)}):Play()
+        task.delay(0.12, function() body.Visible = false end)
+    else
+        body.Visible = true
+        TweenService:Create(main, TweenInfo.new(0.25), {Size = UDim2.fromOffset(UI_W, UI_H)}):Play()
+    end
+end)
+
+closeBtn.MouseButton1Click:Connect(function() gui.Enabled = false end)
+
+local drag, dragStart, startPos = false, nil, nil
+header.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+        drag = true
+        dragStart = input.Position
+        startPos = main.Position
+    end
+end)
+header.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1
+        or input.UserInputType == Enum.UserInputType.Touch then
+        drag = false
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if not drag then return end
+    if input.UserInputType ~= Enum.UserInputType.MouseMovement
+        and input.UserInputType ~= Enum.UserInputType.Touch then return end
+    local d = input.Position - dragStart
+    main.Position = UDim2.new(
+        startPos.X.Scale, startPos.X.Offset + d.X,
+        startPos.Y.Scale, startPos.Y.Offset + d.Y)
 end)
 
 task.spawn(function()
-	while gui.Parent do
-		task.wait(0.25)
-		stealButton.Text = state.Busy and "Cancel" or "Steal"
-	end
+    while gui.Parent do
+        task.wait(CFG.AutoRefresh)
+        if not state.Busy and not state.AutoEnabled then
+            pcall(rebuild)
+        end
+    end
 end)
 
-do
-	local dragging, startPos, startInput
-	header.InputBegan:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1
-			or input.UserInputType == Enum.UserInputType.Touch then
-			dragging, startPos, startInput = true, window.Position, input.Position
-			input.Changed:Connect(function()
-				if input.UserInputState == Enum.UserInputState.End then dragging = false end
-			end)
-		end
-	end)
-	UserInputService.InputChanged:Connect(function(input)
-		if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
-			or input.UserInputType == Enum.UserInputType.Touch) then
-			local delta = input.Position - startInput
-			window.Position = UDim2.new(
-				startPos.X.Scale, startPos.X.Offset + delta.X,
-				startPos.Y.Scale, startPos.Y.Offset + delta.Y)
-		end
-	end)
-end
-
-local minimized = false
-minimize.MouseButton1Click:Connect(function()
-	minimized = not minimized
-	body.Visible = not minimized
-	window.Size = minimized and UDim2.fromOffset(W, HEADER + 4) or UDim2.fromOffset(W, H)
-end)
-
-close.MouseButton1Click:Connect(function()
-	state.Cancel = true
-	shieldStop()
-	shineConnection:Disconnect()
-	gui:Destroy()
-end)
-
-rebuild()
 task.spawn(function()
-	while gui.Parent do
-		task.wait(4)
-		if not state.Busy and body.Visible then rebuild() end
-	end
+    while gui.Parent do
+        task.wait(0.3)
+        if state.Busy then
+            instantBtn.Text = "実行中..."
+            instantBtn.BackgroundColor3 = Color3.fromRGB(80, 30, 30)
+        else
+            instantBtn.Text = "即盗み"
+            instantBtn.BackgroundColor3 = Color3.fromRGB(40, 10, 25)
+        end
+    end
+end)
+
+task.spawn(function()
+    task.wait(0.3)
+    pcall(rebuild)
 end)
 
 shieldStart()
+
+print("[ShouyuHub] 起動完了 / 速度 " .. CFG.SpeedToEgg)
