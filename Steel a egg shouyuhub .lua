@@ -10,7 +10,7 @@ local localPlayer = Players.LocalPlayer
 
 ------------------------------------------------------------------ settings (same values as the hub)
 local CFG = {
-	SpeedToEgg = 3000, -- ★ 卵へ行く時の速度
+	SpeedToEgg = 3000, -- ★ 卵へ行く時の速度（変更箇所・元は walkSpeed()*SpeedCap）
 	SpeedCap = 1.15, -- never above 115% of the walk speed
 	HopRatio = 1.515, -- hop distance = walk speed * ratio (a distance, not a speed)
 	HopMin = 40,
@@ -53,7 +53,8 @@ local function root()
 	return character and character:FindFirstChild("HumanoidRootPart")
 end
 
------------------------------------------------------------------- Humanoid Swap shield
+-- "Humanoid Swap" (the hub's default shield, always on in the hub): the character runs on a copy of its humanoid,
+-- the original is kept out of the character while we steal. Same code path as the hub.
 local shield = { Original = nil, Clone = nil, Links = {}, Connection = nil, Added = nil }
 
 local function walkSpeed()
@@ -275,6 +276,7 @@ pcall(function()
 	end)
 end)
 
+-- the server pulling us back ("Relocate") is noted so the hop is simply repeated
 pcall(function()
 	remote("RE/RigSync/Refresh").OnClientEvent:Connect(function(arg)
 		if type(arg) == "table" and arg.Action == "Relocate" then
@@ -295,6 +297,7 @@ local function dropEgg()
 	end
 end
 
+-- the prompt of the egg itself (nearest egg prompt to the egg's position), never one of another egg
 local function promptNear(position, radius)
 	local best, bestDistance = nil, radius
 	for _, child in ipairs(workspace:GetChildren()) do
@@ -311,6 +314,7 @@ local function promptNear(position, radius)
 	return best
 end
 
+-- the carried egg is welded to the character: used to catch a missed carry signal (same check as the hub)
 local function heldByMe(uid)
 	local character = localPlayer.Character
 	if type(uid) ~= "string" or not character then
@@ -374,6 +378,7 @@ local function eggPosition(uid)
 	return nil
 end
 
+------------------------------------------------------------------ egg info for the list (icon, name, value)
 local function describe(record)
 	local directory = type(Assets) == "table" and Assets.Directory or nil
 	local entry = type(directory) == "table" and directory[tostring(record.AssetCategory)] or nil
@@ -630,7 +635,8 @@ local function avoid(from, to)
 		end
 	end
 	return to
-		end------------------------------------------------------------------ runToEgg (speed = CFG.SpeedToEgg)
+		end-- the hub's "Run" way to the egg: straight on the ground. Speed = CFG.SpeedToEgg (3000).
+-- From the base side it first walks out to the safe-zone point, like the hub does.
 local function runToEgg(uid, egg)
 	local lineX = lineInfo()
 	local home = homePoint()
@@ -676,7 +682,7 @@ local function runToEgg(uid, egg)
 		local waypoint = avoid(r.Position, target)
 		local flat = Vector3.new(waypoint.X - r.Position.X, 0, waypoint.Z - r.Position.Z)
 		local unit = flat.Magnitude > 0.01 and flat.Unit or Vector3.zero
-		local speed = CFG.SpeedToEgg -- ★ 卵へ行く時の速度
+		local speed = CFG.SpeedToEgg -- ★ 変更箇所（元: math.max(walkSpeed() * CFG.SpeedCap, 8)）
 		local v = unit * math.min(speed, flat.Magnitude / 0.05)
 		pcall(function()
 			r.AssemblyLinearVelocity = Vector3.new(v.X, r.AssemblyLinearVelocity.Y, v.Z)
@@ -685,6 +691,7 @@ local function runToEgg(uid, egg)
 			end
 		end)
 
+		-- stuck on something: jump
 		if os.clock() - lastCheck >= 1.5 then
 			if (r.Position - lastPos).Magnitude < 3 and humanoid and flatEgg.Magnitude > 15 then
 				pcall(function()
@@ -694,6 +701,7 @@ local function runToEgg(uid, egg)
 			lastPos, lastCheck = r.Position, os.clock()
 		end
 
+		-- close enough for the prompt: ask for the egg while arriving
 		if stage == "field" and flatEgg.Magnitude <= 9 and os.clock() - lastTake > 0.1 then
 			lastTake = os.clock()
 			takeEgg(uid)
@@ -713,6 +721,7 @@ local function runToEgg(uid, egg)
 	return state.Carrying or (r ~= nil and Vector3.new(egg.X - r.Position.X, 0, egg.Z - r.Position.Z).Magnitude <= 6)
 end
 
+-- current position of an egg lying in the world (cheap), with the snapshot as fallback
 local function eggNow(uid, cache)
 	local node = workspace:FindFirstChild(uid)
 	local slots = workspace:FindFirstChild("AreaEggSlotsClient")
@@ -733,6 +742,7 @@ local function eggNow(uid, cache)
 	return cache.Pos
 end
 
+-- take the egg that lies next to us (also used to take it back after the drop): follow it, fire its prompt and send the request
 local function grab(uid, timeout)
 	local cache = { At = 0 }
 	local waited, since = 0, 1
@@ -810,11 +820,13 @@ local function groundY(position, fallback)
 	return y
 end
 
+-- safe zone: same route as the Normal mode: checkpoint 7 studs past the line, then the base.
+-- Speed = the hub's carry plan (never above 115% of the walk speed), the run starts above the base and comes down.
 local function carrySpeed(distance)
 	local ws = walkSpeed()
 	local base = ws * math.min(CFG.CarryRatio, CFG.SpeedCap) * state.Mult
-	local fast = base * 1.5
-	local excess = 5.5 * base
+	local fast = base * 1.5 -- SpeedRatio
+	local excess = 5.5 * base -- ExcessSeconds
 	local limit = fast
 	if distance and distance > excess then
 		limit = math.min(fast, base * distance / (distance - excess))
@@ -835,6 +847,7 @@ local function runHome(lineX, laneZ)
 		humanoid.PlatformStand = false
 	end
 
+	-- rise above the base first (no horizontal move), like the hub
 	local r = root()
 	if r and character and height > 0.5 and home.Y + height - 2 > r.Position.Y then
 		pcall(function()
@@ -844,6 +857,7 @@ local function runHome(lineX, laneZ)
 		end)
 	end
 
+	-- the speed is planned once, at the start, from the distance still to go (the hub does the same)
 	local start = root()
 	local speed = carrySpeed(start and (Vector3.new(start.Position.X - home.X, 0, start.Position.Z - home.Z).Magnitude + math.max(0, height) * 2) or nil)
 
@@ -891,6 +905,7 @@ local function runHome(lineX, laneZ)
 	while settle < 2 and state.Delivered < started and state.Carrying and not state.Cancel do
 		settle += RunService.Heartbeat:Wait()
 	end
+	-- still in the hands at home: put it down so the base takes it
 	if state.Carrying and state.Delivered < started and not state.Cancel then
 		task.wait(0.2)
 		dropEgg()
@@ -910,6 +925,7 @@ local function runHome(lineX, laneZ)
 	local laneZ = math.clamp(r.Position.Z, -425, -300)
 	local landing = Vector3.new(lineX + CFG.LandOffset, lineY + 3.35, laneZ)
 
+	-- hops towards the line; a pull-back repeats the same hop with a longer pause (the pause is learned)
 	local hopStep = math.max(walkSpeed() * CFG.HopRatio, CFG.HopMin)
 	local hopY = r.Position.Y + CFG.HopLift
 	local x = r.Position.X
@@ -921,6 +937,7 @@ local function runHome(lineX, laneZ)
 
 	while x - hopStep > landing.X and not state.Cancel do
 		if not state.Carrying then
+			-- the server let go of the egg on the way: take it back right away
 			if not regrab(uid) then
 				break
 			end
@@ -960,10 +977,12 @@ local function runHome(lineX, laneZ)
 		end
 	end
 
+	-- landing in front of the line
 	status("Instant TP: landing next to the line")
 	landing = Vector3.new(landing.X, groundY(landing, landing.Y), landing.Z)
 	local function land()
 		local current = root()
+		-- never jump backwards: if we are already closer to the line than the landing spot, stay
 		if current and current.Position.X <= landing.X + 1 and current.Position.Y > landing.Y - 25 then
 			pcall(function()
 				current.AssemblyLinearVelocity = Vector3.zero
@@ -988,6 +1007,7 @@ local function runHome(lineX, laneZ)
 	end
 	dropClone()
 
+	-- drop at the line, take it back
 	if state.Carrying and not state.Cancel then
 		local delay = 0
 		while delay < CFG.DropDelay do
@@ -1006,6 +1026,7 @@ local function runHome(lineX, laneZ)
 				current.AssemblyAngularVelocity = Vector3.zero
 			end)
 		end
+		-- egg is down: let go of the camera and the copy, then take it back
 		releaseCamera()
 		dropClone()
 		status("Instant TP: taking the egg back")
@@ -1018,6 +1039,7 @@ local function runHome(lineX, laneZ)
 	end
 	releaseCamera()
 
+	-- straight to the safe zone
 	local ok = false
 	if state.Carrying then
 		ok = runHome(lineX, laneZ)
