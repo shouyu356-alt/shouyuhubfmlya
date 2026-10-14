@@ -549,7 +549,7 @@ local function grab(uid, timeout)
 			local delta = egg - r.Position
 			if delta.Magnitude > 2 then
 				-- ★ 固定800
-				local v = delta / math.max(0.03, dt)
+				local v = delta / math.max(0.55, dt)
 				if v.Magnitude > CFG.Speed then v = v.Unit * CFG.Speed end
 				pcall(function()
 					r.AssemblyLinearVelocity = v + Vector3.new(0, workspace.Gravity * dt * 0.5, 0)
@@ -593,7 +593,7 @@ local function runHome(lineX, laneZ)
 	local home = homePoint()
 	local checkpoint = lineX - 7
 	local height = CFG.Height
-	local share = math.clamp(CFG.ClimbShare, 0.1, 0.2.5)
+	local share = math.clamp(CFG.ClimbShare, 0.1, 0.3)
 	local descent = height * math.sqrt(1 - share * share) / share
 	local character = localPlayer.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
