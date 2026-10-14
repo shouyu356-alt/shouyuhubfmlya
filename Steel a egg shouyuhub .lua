@@ -610,7 +610,7 @@ local function runHome(lineX, laneZ)
 		end)
 	end
 
-	-- ★ 帰り速度 250
+	-- ★ 帰り速度 500
 	local speed = 500
 	local last = os.clock()
 	local timeout = 0
