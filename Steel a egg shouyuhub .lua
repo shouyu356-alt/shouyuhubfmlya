@@ -1,6 +1,7 @@
 -- ============================================================
--- 800固定 走り納品版 | PART 1/4
+-- 修正版 | PART 1/4
 -- 初期化・設定・ゲームハンドル・シールド
+-- 行き1850 / 帰り250
 -- ============================================================
 local Players           = game:GetService("Players")
 local RunService        = game:GetService("RunService")
@@ -9,13 +10,14 @@ local UserInputService  = game:GetService("UserInputService")
 local CoreGui           = game:GetService("CoreGui")
 local localPlayer       = Players.LocalPlayer
 
------------------------------------------------------------------- 設定（速度800固定）
+------------------------------------------------------------------ 設定
 local CFG = {
-	Speed = 800,          -- ★ 卵へ向かう時 & 帰る時の速度（固定）
-	GrabInterval = 0.03,  -- プロンプト連打間隔
-	RegrabFar = 40,       -- 卵がこれ以上離れたら近づいて取り直す
-	Height = 70,          -- 帰る時の上昇高度
-	ClimbShare = 0.5,     -- 上昇と水平の配分
+	SpeedToEgg = 1850,    -- ★ 行き速度
+	SpeedHome  = 250,     -- ★ 帰り速度
+	GrabInterval = 0.03,
+	RegrabFar = 40,
+	Height = 70,
+	ClimbShare = 0.5,
 }
 
 ------------------------------------------------------------------ ゲームハンドル
@@ -187,7 +189,7 @@ local function shieldStop()
 	if shield.Added then shield.Added:Disconnect(); shield.Added = nil end
 	shieldUndo()
 end-- ============================================================
--- 800固定 走り納品版 | PART 2/4
+-- 修正版 | PART 2/4
 -- ステート・卵情報・スナップショット
 -- ============================================================
 local state = {
@@ -298,7 +300,6 @@ local function eggPosition(uid)
 	return nil
 end
 
--- 卵の位置（安価版）
 local function eggNow(uid, cache)
 	local node  = workspace:FindFirstChild(uid)
 	local slots = workspace:FindFirstChild("AreaEggSlotsClient")
@@ -314,7 +315,7 @@ local function eggNow(uid, cache)
 	return cache.Pos
 end
 
------------------------------------------------------------------- 卵情報（名前・アイコン・価値）
+------------------------------------------------------------------ 卵情報
 local function describe(record)
 	local directory = type(Assets) == "table" and Assets.Directory or nil
 	local entry = type(directory) == "table" and directory[tostring(record.AssetCategory)] or nil
@@ -462,12 +463,13 @@ local function avoid(from, to)
 	end
 	return to
 	end-- ============================================================
--- 800固定 走り納品版 | PART 3/4
+-- 修正版 | PART 3/4
 -- 走りロジック（卵へ→グラブ→帰る）+ stealAndDeliver
+-- 行き1850 / 帰り250
 -- ============================================================
 local status = function(text) end
 
------------------------------------------------------------------- 卵へ走る（800固定）
+------------------------------------------------------------------ 卵へ走る（行き1850）
 local function runToEgg(uid, egg)
 	local lineX = lineInfo()
 	local home  = homePoint()
@@ -505,8 +507,8 @@ local function runToEgg(uid, egg)
 		local waypoint = avoid(r.Position, target)
 		local flat = Vector3.new(waypoint.X - r.Position.X, 0, waypoint.Z - r.Position.Z)
 		local unit = flat.Magnitude > 0.01 and flat.Unit or Vector3.zero
-		-- ★ 固定800
-		local v = unit * math.min(CFG.Speed, flat.Magnitude / 0.25)
+		-- ★ 行き速度 1850
+		local v = unit * math.min(CFG.SpeedToEgg, flat.Magnitude / 0.25)
 		pcall(function()
 			r.AssemblyLinearVelocity = Vector3.new(v.X, r.AssemblyLinearVelocity.Y, v.Z)
 			if humanoid and unit.Magnitude > 0 then humanoid:Move(unit, false) end
@@ -536,7 +538,7 @@ local function runToEgg(uid, egg)
 	return state.Carrying or (r ~= nil and Vector3.new(egg.X - r.Position.X, 0, egg.Z - r.Position.Z).Magnitude <= 6)
 end
 
------------------------------------------------------------------- グラブ（800固定）
+------------------------------------------------------------------ グラブ（接近1850）
 local function grab(uid, timeout)
 	local cache = { At = 0 }
 	local waited, since = 0, 1
@@ -548,9 +550,9 @@ local function grab(uid, timeout)
 		if r and egg then
 			local delta = egg - r.Position
 			if delta.Magnitude > 2 then
-				-- ★ 固定800
+				-- ★ 接近速度 1850
 				local v = delta / math.max(0.55, dt)
-				if v.Magnitude > CFG.Speed then v = v.Unit * CFG.Speed end
+				if v.Magnitude > CFG.SpeedToEgg then v = v.Unit * CFG.SpeedToEgg end
 				pcall(function()
 					r.AssemblyLinearVelocity = v + Vector3.new(0, workspace.Gravity * dt * 0.5, 0)
 					r.AssemblyAngularVelocity = Vector3.zero
@@ -587,7 +589,7 @@ local function regrab(uid)
 	return grab(uid, 5)
 end
 
------------------------------------------------------------------- 帰る（800固定）
+------------------------------------------------------------------ 帰る（帰り250）
 local function runHome(lineX, laneZ)
 	local started = os.clock()
 	local home = homePoint()
@@ -599,7 +601,6 @@ local function runHome(lineX, laneZ)
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 	if humanoid then humanoid.PlatformStand = false end
 
-	-- ベース上空へ（水平移動なし）
 	local r = root()
 	if r and character and height > 0.5 and home.Y + height - 2 > r.Position.Y then
 		pcall(function()
@@ -609,7 +610,8 @@ local function runHome(lineX, laneZ)
 		end)
 	end
 
-	local speed = CFG.Speed
+	-- ★ 帰り速度 250
+	local speed = CFG.SpeedHome
 	local last = os.clock()
 	local timeout = 0
 	status("Safe zone")
@@ -644,7 +646,6 @@ local function runHome(lineX, laneZ)
 	while settle < 2 and state.Delivered < started and state.Carrying and not state.Cancel do
 		settle += RunService.Heartbeat:Wait()
 	end
-	-- まだ持っていたら落としてベースに渡す
 	if state.Carrying and state.Delivered < started and not state.Cancel then
 		task.wait(0.2)
 		dropEgg()
@@ -656,7 +657,7 @@ local function runHome(lineX, laneZ)
 	return state.Delivered >= started
 end
 
------------------------------------------------------------------- 盗んで納品（走りのみ）
+------------------------------------------------------------------ 盗んで納品
 local function stealAndDeliver(uid)
 	if state.Busy then return end
 	state.Busy = true
@@ -683,7 +684,6 @@ local function stealAndDeliver(uid)
 				status("The egg would not come free")
 				return
 			end
-			-- ★ 走り納品（Instant TPなし）
 			local lineX, lineY = lineInfo()
 			local current = root()
 			local laneZ = current and math.clamp(current.Position.Z, -425, -300) or -360
@@ -695,9 +695,10 @@ local function stealAndDeliver(uid)
 		end
 		state.Busy = false
 	end)
-		end-- ============================================================
--- 800固定 走り納品版 | PART 4/4
--- UI（yslemStyle）
+end
+-- ★ 余分な end を削除（ここがUI非表示の原因だった）-- ============================================================
+-- 修正版 | PART 4/4
+-- UI（yslemStyle）— PlayerGui優先 + Enabled=true
 -- ============================================================
 local WHITE  = Color3.fromRGB(255, 255, 255)
 local SILVER = Color3.fromRGB(150, 150, 156)
@@ -709,7 +710,10 @@ local RARITY_COLORS = {
 	Color3.fromRGB(255, 90, 200), Color3.fromRGB(80, 235, 235),
 }
 
+-- ★ PlayerGui優先に変更
 local function parentGui()
+	local playerGui = localPlayer:FindFirstChild("PlayerGui")
+	if playerGui then return playerGui end
 	if typeof(gethui) == "function" then
 		local ok, result = pcall(gethui)
 		if ok and typeof(result) == "Instance" then return result end
@@ -766,7 +770,15 @@ end
 local old = parentGui():FindFirstChild("yslemEgg")
 if old then old:Destroy() end
 
-local gui = make("ScreenGui", { Name = "yslemEgg", ResetOnSpawn = false, ZIndexBehavior = Enum.ZIndexBehavior.Sibling, IgnoreGuiInset = true })
+-- ★ Enabled = true を追加
+local gui = make("ScreenGui", {
+	Name = "yslemEgg",
+	ResetOnSpawn = false,
+	ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+	IgnoreGuiInset = true,
+	Enabled = true,
+	DisplayOrder = 999999,
+})
 gui.Parent = parentGui()
 
 local W, H, HEADER = 158, 188, 20
@@ -792,7 +804,6 @@ local shineConnection = RunService.Heartbeat:Connect(function(dt)
 	end
 end)
 
--- ヘッダー
 local header = make("Frame", {
 	Size = UDim2.new(1, -8, 0, HEADER - 4),
 	Position = UDim2.fromOffset(4, 4),
@@ -810,7 +821,7 @@ text(header, {
 	Font = Enum.Font.GothamBlack, TextSize = 10,
 	TextColor3 = Color3.new(0, 0, 0),
 	TextXAlignment = Enum.TextXAlignment.Left,
-	Text = "yslemEgg 800",
+	Text = "yslemEgg 1850/250",
 	Living = false,
 })
 
@@ -979,7 +990,6 @@ task.spawn(function()
 	end
 end)
 
--- ドラッグ
 do
 	local dragging, startPos, startInput
 	header.InputBegan:Connect(function(input)
