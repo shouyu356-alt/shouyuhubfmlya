@@ -1,4 +1,4 @@
--- ShouyuHub | Instant TP + UI
+-- ShouyuHub | Instant TP
 local Players           = game:GetService("Players")
 local RunService        = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -6,6 +6,7 @@ local UserInputService  = game:GetService("UserInputService")
 local TweenService      = game:GetService("TweenService")
 local CoreGui           = game:GetService("CoreGui")
 local localPlayer       = Players.LocalPlayer
+local IS_MOBILE         = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
 
 local CFG = {
 	SpeedToEgg   = 3000,
@@ -30,6 +31,18 @@ local CFG = {
 }
 local FPS = { 60, 30, 0.15 }
 
+local THEME = {
+	Bg          = Color3.fromRGB(18, 6, 8),
+	Panel       = Color3.fromRGB(28, 8, 12),
+	Card        = Color3.fromRGB(34, 10, 14),
+	Accent      = Color3.fromRGB(220, 40, 60),
+	AccentSoft  = Color3.fromRGB(255, 140, 150),
+	AccentDeep  = Color3.fromRGB(90, 12, 22),
+	Text        = Color3.fromRGB(240, 230, 232),
+	TextDim     = Color3.fromRGB(180, 150, 155),
+	Stroke      = Color3.fromRGB(80, 30, 40),
+}
+
 local function safeRequire(getter)
 	local ok, result = pcall(function() return require(getter()) end)
 	return ok and result or nil
@@ -46,6 +59,7 @@ local function root()
 	return character and character:FindFirstChild("HumanoidRootPart")
 end
 
+------------------------------------------------------------------ シールド
 local shield = { Original = nil, Clone = nil, Links = {}, Connection = nil, Added = nil }
 
 local function walkSpeed()
@@ -201,6 +215,7 @@ endlocal state = {
 	Busy = false, Cancel = false, Mult = 1,
 	PulledAt = 0, HeldSeen = 0, GuessedDrop = false,
 	ReleaseCamera = nil,
+	AutoEnabled = false, AutoRunning = false,
 }
 
 if type(EggState) == "table" and type(EggState.CarryChanged) == "table" and type(EggState.CarryChanged.Connect) == "function" then
@@ -367,9 +382,7 @@ local function frozenCamera()
 		camera.CFrame = frame
 	end)
 	return function()
-		pcall(function()
-			camera.CameraType = oldType
-		end)
+		pcall(function() camera.CameraType = oldType end)
 	end
 end
 
@@ -400,9 +413,7 @@ local stealClone = nil
 local function dropClone()
 	local copy = stealClone
 	stealClone = nil
-	if copy then
-		pcall(function() copy:Destroy() end)
-	end
+	if copy then pcall(function() copy:Destroy() end) end
 end
 
 local function postClone()
@@ -472,11 +483,8 @@ local function dangers()
 	local list = {}
 	local function add(inst)
 		local ok, cf, size = pcall(function()
-			if inst:IsA("Model") then
-				return inst:GetBoundingBox()
-			elseif inst:IsA("BasePart") then
-				return inst.CFrame, inst.Size
-			end
+			if inst:IsA("Model") then return inst:GetBoundingBox()
+			elseif inst:IsA("BasePart") then return inst.CFrame, inst.Size end
 		end)
 		if ok and cf and size then
 			local half = Vector3.new(math.abs(size.X), 0, math.abs(size.Z)) * 0.5
@@ -499,9 +507,7 @@ local function dangers()
 		if (child:IsA("Model") or child:IsA("BasePart") or child:IsA("Folder")) and bad(child.Name) then
 			if child:IsA("Folder") then
 				for _, inner in ipairs(child:GetChildren()) do add(inner) end
-			else
-				add(child)
-			end
+			else add(child) end
 		end
 	end
 	local build = workspace:FindFirstChild("World")
@@ -540,9 +546,7 @@ local function avoid(from, to)
 			if hit then
 				local zLow, zHigh = z0 - 2, z1 + 2
 				local z = math.abs(from.Z - zLow) <= math.abs(from.Z - zHigh) and zLow or zHigh
-				if z < -440 or z > -290 then
-					z = z == zLow and zHigh or zLow
-				end
+				if z < -440 or z > -290 then z = z == zLow and zHigh or zLow end
 				local x = math.abs(from.X - x0) <= math.abs(from.X - x1) and x0 or x1
 				if math.abs(from.Z - z) < 3 then
 					x = math.abs(to.X - x0) <= math.abs(to.X - x1) and x0 or x1
@@ -552,8 +556,7 @@ local function avoid(from, to)
 		end
 	end
 	return to
-		end-- ★ 行く時の速度 = CFG.SpeedToEgg (3000)
-local function runToEgg(uid, egg)
+		endlocal function runToEgg(uid, egg)
 	local lineX = lineInfo()
 	local home = homePoint()
 	local character = localPlayer.Character
@@ -582,15 +585,13 @@ local function runToEgg(uid, egg)
 		if stage == "safe" then
 			if Vector3.new(home.X - r.Position.X, 0, home.Z - r.Position.Z).Magnitude <= 6 then
 				stage = "field"
-			else
-				target = home
-			end
+			else target = home end
 		end
 
 		local waypoint = avoid(r.Position, target)
 		local flat = Vector3.new(waypoint.X - r.Position.X, 0, waypoint.Z - r.Position.Z)
 		local unit = flat.Magnitude > 0.01 and flat.Unit or Vector3.zero
-		local speed = CFG.SpeedToEgg -- ★
+		local speed = CFG.SpeedToEgg
 		local v = unit * math.min(speed, flat.Magnitude / 0.05)
 		pcall(function()
 			r.AssemblyLinearVelocity = Vector3.new(v.X, r.AssemblyLinearVelocity.Y, v.Z)
@@ -853,9 +854,7 @@ local function runHome(lineX, laneZ)
 		if state.Carrying and landed and (landed.Position.X - landing.X > 12 or landed.Position.Y < landing.Y - 25) then
 			status("Instant TP: landing retry " .. attempt)
 			land()
-		else
-			break
-		end
+		else break end
 	end
 	dropClone()
 
@@ -943,20 +942,62 @@ local function stealAndDeliver(uid)
 		end
 		state.Busy = false
 	end)
-				end------------------------------------------------------------------ UI
-print("[ShouyuHub] UI")
+end
 
-local THEME = {
-	Bg     = Color3.fromRGB(20, 8, 12),
-	Panel  = Color3.fromRGB(28, 8, 12),
-	Card   = Color3.fromRGB(34, 10, 14),
-	Accent = Color3.fromRGB(220, 40, 60),
-	Soft   = Color3.fromRGB(255, 140, 150),
-	Deep   = Color3.fromRGB(90, 12, 22),
-	Text   = Color3.fromRGB(240, 230, 232),
-	Dim    = Color3.fromRGB(180, 150, 155),
-	Stroke = Color3.fromRGB(80, 30, 40),
-}
+local autoStealThread = nil
+
+function startAutoSteal()
+	if state.AutoRunning then return end
+	state.AutoEnabled = true
+	state.AutoRunning = true
+	autoStealThread = task.spawn(function()
+		while state.AutoEnabled do
+			if not state.Busy then
+				local records = snapshot()
+				local best, bestInfo = nil, nil
+				for _, record in ipairs(records) do
+					local info = describe(record)
+					if not bestInfo or info.Value > bestInfo.Value then
+						best, bestInfo = record, info
+					end
+				end
+				if best then
+					status("Auto: " .. bestInfo.Name)
+					stealAndDeliver(best.Uid)
+				end
+			end
+			task.wait(1.5)
+		end
+		state.AutoRunning = false
+	end)
+end
+
+function stopAutoSteal()
+	state.AutoEnabled = false
+	state.Cancel = true
+	if autoStealThread then
+		pcall(task.cancel, autoStealThread)
+		autoStealThread = nil
+	end
+	state.AutoRunning = false
+				end-- ============================================================
+-- PART 6/6 - UI（自作）
+-- ============================================================
+
+print("[ShouyuHub] UI構築開始")
+
+local UI = { W = 340, H = 500, Scale = 1, Minimized = false }
+local UI_W, UI_H, UI_H_MIN = UI.W, UI.H, 68
+
+local function getParent()
+	local pg = localPlayer:FindFirstChildOfClass("PlayerGui")
+	if pg then return pg end
+	if type(gethui) == "function" then
+		local ok, r = pcall(gethui)
+		if ok and typeof(r) == "Instance" then return r end
+	end
+	return CoreGui
+end
 
 local gui = Instance.new("ScreenGui")
 gui.Name = "ShouyuHub_" .. tostring(math.random(1000, 9999))
@@ -965,84 +1006,184 @@ gui.IgnoreGuiInset = true
 gui.DisplayOrder = 999999
 gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 gui.Enabled = true
-gui.Parent = localPlayer:WaitForChild("PlayerGui")
 
-print("[ShouyuHub] Parent:", gui.Parent and gui.Parent:GetFullName() or "nil")
+if type(syn) == "table" and type(syn.protect_gui) == "function" then
+	pcall(syn.protect_gui, gui)
+end
+
+local parent = getParent()
+if parent then
+	local ok = pcall(function() gui.Parent = parent end)
+	if not ok or not gui.Parent then
+		local pg = localPlayer:WaitForChild("PlayerGui", 5)
+		if pg then gui.Parent = pg end
+	end
+end
+
+print("[ShouyuHub] GUI Parent:", gui.Parent and gui.Parent:GetFullName() or "nil")
+
+local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1280, 720)
+if IS_MOBILE then
+	UI.Scale = math.min(vp.X * 0.92 / UI_W, vp.Y * 0.80 / UI_H, 1)
+end
 
 local main = Instance.new("Frame", gui)
 main.AnchorPoint = Vector2.new(0.5, 0.5)
-main.Size = UDim2.fromOffset(320, 460)
+main.Size = UDim2.fromOffset(UI_W, UI_H)
 main.Position = UDim2.new(0.5, 0, 0.5, 0)
 main.BackgroundColor3 = THEME.Bg
 main.BorderSizePixel = 0
 main.Active = true
 main.ClipsDescendants = true
-Instance.new("UICorner", main).CornerRadius = UDim.new(0, 12)
-local mS = Instance.new("UIStroke", main)
-mS.Color = THEME.Accent
-mS.Thickness = 1.5
-mS.Transparency = 0.25
 
-local hdr = Instance.new("Frame", main)
-hdr.Size = UDim2.new(1, -12, 0, 44)
-hdr.Position = UDim2.fromOffset(6, 6)
-hdr.BackgroundColor3 = THEME.Deep
-hdr.BorderSizePixel = 0
-Instance.new("UICorner", hdr).CornerRadius = UDim.new(0, 8)
+local us = Instance.new("UIScale", main)
+us.Scale = UI.Scale
 
-local title = Instance.new("TextLabel", hdr)
-title.Size = UDim2.new(1, -80, 1, 0)
-title.Position = UDim2.fromOffset(10, 0)
+Instance.new("UICorner", main).CornerRadius = UDim.new(0, 14)
+local stroke = Instance.new("UIStroke", main)
+stroke.Color = THEME.Accent
+stroke.Thickness = 1.5
+stroke.Transparency = 0.25
+
+local bg = Instance.new("Frame", main)
+bg.Size = UDim2.fromScale(1, 1)
+bg.BackgroundColor3 = THEME.AccentDeep
+bg.BackgroundTransparency = 0.7
+bg.BorderSizePixel = 0
+bg.ZIndex = 1
+Instance.new("UICorner", bg).CornerRadius = UDim.new(0, 14)
+local bgG = Instance.new("UIGradient", bg)
+bgG.Rotation = 90
+bgG.Color = ColorSequence.new({
+	ColorSequenceKeypoint.new(0, THEME.AccentDeep),
+	ColorSequenceKeypoint.new(0.5, THEME.Bg),
+	ColorSequenceKeypoint.new(1, Color3.fromRGB(5, 2, 3)),
+})
+
+local header = Instance.new("Frame", main)
+header.Size = UDim2.new(1, -16, 0, 56)
+header.Position = UDim2.fromOffset(8, 8)
+header.BackgroundColor3 = THEME.Panel
+header.BackgroundTransparency = 0.05
+header.BorderSizePixel = 0
+header.ZIndex = 5
+Instance.new("UICorner", header).CornerRadius = UDim.new(0, 10)
+
+local hS = Instance.new("UIStroke", header)
+hS.Color = Color3.fromRGB(120, 12, 20)
+hS.Thickness = 1.2
+hS.Transparency = 0.35
+
+local avatarFrame = Instance.new("Frame", header)
+avatarFrame.Size = UDim2.fromOffset(40, 40)
+avatarFrame.Position = UDim2.fromOffset(8, 8)
+avatarFrame.BackgroundColor3 = THEME.AccentDeep
+avatarFrame.BorderSizePixel = 0
+avatarFrame.ZIndex = 6
+Instance.new("UICorner", avatarFrame).CornerRadius = UDim.new(1, 0)
+
+local avatarStroke = Instance.new("UIStroke", avatarFrame)
+avatarStroke.Color = THEME.Accent
+avatarStroke.Thickness = 1.5
+avatarStroke.Transparency = 0.3
+
+local avatarImg = Instance.new("ImageLabel", avatarFrame)
+avatarImg.Size = UDim2.fromScale(0.88, 0.88)
+avatarImg.Position = UDim2.fromScale(0.06, 0.06)
+avatarImg.BackgroundTransparency = 1
+avatarImg.Image = "rbxthumb://type=AvatarHeadShot&id=" .. localPlayer.UserId .. "&w=150&h=150"
+avatarImg.ZIndex = 7
+Instance.new("UICorner", avatarImg).CornerRadius = UDim.new(1, 0)
+
+local title = Instance.new("TextLabel", header)
+title.Size = UDim2.new(1, -150, 0, 22)
+title.Position = UDim2.fromOffset(58, 8)
 title.BackgroundTransparency = 1
-title.Text = "SHOUYU HUB  -  " .. tostring(CFG.SpeedToEgg)
-title.TextColor3 = THEME.Soft
-title.Font = Enum.Font.GothamBold
-title.TextSize = 14
+title.Text = "SHOUYU HUB"
+title.TextColor3 = THEME.AccentSoft
+title.Font = Enum.Font.GothamBlack
+title.TextSize = 16
 title.TextXAlignment = Enum.TextXAlignment.Left
+title.ZIndex = 6
 
-local closeBtn = Instance.new("TextButton", hdr)
-closeBtn.Size = UDim2.fromOffset(28, 28)
-closeBtn.Position = UDim2.new(1, -34, 0.5, -14)
-closeBtn.BackgroundColor3 = Color3.fromRGB(150, 20, 30)
+local sub = Instance.new("TextLabel", header)
+sub.Size = UDim2.new(1, -150, 0, 14)
+sub.Position = UDim2.fromOffset(58, 30)
+sub.BackgroundTransparency = 1
+sub.Text = "STEAL AN EGG - " .. tostring(CFG.SpeedToEgg)
+sub.TextColor3 = THEME.TextDim
+sub.Font = Enum.Font.GothamBold
+sub.TextSize = 10
+sub.TextXAlignment = Enum.TextXAlignment.Left
+sub.ZIndex = 6
+
+local minBtn = Instance.new("TextButton", header)
+minBtn.Size = UDim2.fromOffset(32, 32)
+minBtn.Position = UDim2.new(1, -78, 0.5, -16)
+minBtn.BackgroundColor3 = THEME.AccentDeep
+minBtn.BorderSizePixel = 0
+minBtn.Text = "−"
+minBtn.TextColor3 = THEME.AccentSoft
+minBtn.Font = Enum.Font.GothamBold
+minBtn.TextSize = 20
+minBtn.AutoButtonColor = true
+minBtn.ZIndex = 6
+Instance.new("UICorner", minBtn).CornerRadius = UDim.new(0, 8)
+
+local closeBtn = Instance.new("TextButton", header)
+closeBtn.Size = UDim2.fromOffset(32, 32)
+closeBtn.Position = UDim2.new(1, -42, 0.5, -16)
+closeBtn.BackgroundColor3 = THEME.AccentDeep
 closeBtn.BorderSizePixel = 0
-closeBtn.Text = "X"
-closeBtn.TextColor3 = Color3.new(1, 1, 1)
+closeBtn.Text = "×"
+closeBtn.TextColor3 = THEME.AccentSoft
 closeBtn.Font = Enum.Font.GothamBold
-closeBtn.TextSize = 14
-Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 6)
+closeBtn.TextSize = 20
+closeBtn.AutoButtonColor = true
+closeBtn.ZIndex = 6
+Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 8)
 
-local statusLbl = Instance.new("TextLabel", main)
-statusLbl.Size = UDim2.new(1, -20, 0, 20)
-statusLbl.Position = UDim2.fromOffset(10, 54)
+local body = Instance.new("Frame", main)
+body.Size = UDim2.new(1, -16, 1, -72)
+body.Position = UDim2.fromOffset(8, 72)
+body.BackgroundTransparency = 1
+body.ZIndex = 5
+
+local statusLbl = Instance.new("TextLabel", body)
+statusLbl.Size = UDim2.new(1, -110, 0, 22)
+statusLbl.Position = UDim2.fromOffset(6, 0)
 statusLbl.BackgroundTransparency = 1
-statusLbl.Text = "待機中"
-statusLbl.TextColor3 = THEME.Dim
-statusLbl.Font = Enum.Font.Gotham
+statusLbl.Text = "速度: " .. CFG.SpeedToEgg .. " / 待機中"
+statusLbl.TextColor3 = THEME.TextDim
+statusLbl.Font = Enum.Font.GothamMedium
 statusLbl.TextSize = 12
 statusLbl.TextXAlignment = Enum.TextXAlignment.Left
+statusLbl.ZIndex = 6
 
-local list = Instance.new("ScrollingFrame", main)
-list.Size = UDim2.new(1, -20, 1, -180)
-list.Position = UDim2.fromOffset(10, 78)
+local list = Instance.new("ScrollingFrame", body)
+list.Size = UDim2.new(1, -4, 1, -150)
+list.Position = UDim2.fromOffset(2, 26)
 list.BackgroundColor3 = THEME.Panel
+list.BackgroundTransparency = 0.15
 list.BorderSizePixel = 0
-list.ScrollBarThickness = 4
+list.ScrollBarThickness = 5
 list.ScrollBarImageColor3 = THEME.Accent
 list.CanvasSize = UDim2.new()
 list.AutomaticCanvasSize = Enum.AutomaticSize.Y
-Instance.new("UICorner", list).CornerRadius = UDim.new(0, 8)
+list.ZIndex = 5
+Instance.new("UICorner", list).CornerRadius = UDim.new(0, 10)
 
-local lLay = Instance.new("UIListLayout", list)
-lLay.Padding = UDim.new(0, 4)
-lLay.SortOrder = Enum.SortOrder.LayoutOrder
+local lLayout = Instance.new("UIListLayout", list)
+lLayout.Padding = UDim.new(0, 5)
+lLayout.SortOrder = Enum.SortOrder.LayoutOrder
 
 local lPad = Instance.new("UIPadding", list)
-lPad.PaddingTop = UDim.new(0, 4)
-lPad.PaddingBottom = UDim.new(0, 4)
-lPad.PaddingLeft = UDim.new(0, 4)
-lPad.PaddingRight = UDim.new(0, 4)
+lPad.PaddingTop = UDim.new(0, 6)
+lPad.PaddingBottom = UDim.new(0, 6)
+lPad.PaddingLeft = UDim.new(0, 6)
+lPad.PaddingRight = UDim.new(0, 8)
 
-local RCOL = {
+local RARITY_COLORS = {
 	Color3.fromRGB(190, 190, 190), Color3.fromRGB(110, 210, 110),
 	Color3.fromRGB(90, 160, 255), Color3.fromRGB(190, 110, 255),
 	Color3.fromRGB(255, 170, 50), Color3.fromRGB(255, 80, 80),
@@ -1052,82 +1193,92 @@ local RCOL = {
 local selectedUid = nil
 local rows = {}
 
-local function setSel(uid)
+local function setSelected(uid)
 	selectedUid = uid
-	for k, r in pairs(rows) do
-		local on = k == uid
-		r.S.Thickness = on and 2 or 1
-		r.S.Color = on and THEME.Accent or THEME.Stroke
-		r.F.BackgroundColor3 = on and THEME.Deep or THEME.Card
+	for rowUid, row in pairs(rows) do
+		local on = rowUid == uid
+		row.Stroke.Thickness = on and 2.5 or 1
+		row.Stroke.Color = on and THEME.Accent or THEME.Stroke
+		row.Stroke.Transparency = on and 0 or 0.6
+		row.Frame.BackgroundColor3 = on and THEME.AccentDeep or THEME.Card
 	end
 end
 
 local function rebuild()
-	for _, r in pairs(rows) do
-		pcall(function() r.F:Destroy() end)
+	for _, row in pairs(rows) do
+		pcall(function() row.Frame:Destroy() end)
 	end
-	rows = {}
+	table.clear(rows)
+
 	local infos = {}
-	local ok, recs = pcall(snapshot)
-	if ok and type(recs) == "table" then
-		for _, rec in ipairs(recs) do
-			local okD, info = pcall(describe, rec)
-			if okD and info then table.insert(infos, info) end
+	local ok, records = pcall(snapshot)
+	if ok and type(records) == "table" then
+		for _, record in ipairs(records) do
+			local okD, info = pcall(describe, record)
+			if okD and info then infos[#infos + 1] = info end
 		end
 	end
 	table.sort(infos, function(a, b) return (a.Value or 0) > (b.Value or 0) end)
 
-	for i, info in ipairs(infos) do
-		local f = Instance.new("TextButton", list)
-		f.Size = UDim2.new(1, 0, 0, 44)
-		f.BackgroundColor3 = THEME.Card
-		f.BorderSizePixel = 0
-		f.Text = ""
-		f.LayoutOrder = i
-		f.AutoButtonColor = true
-		Instance.new("UICorner", f).CornerRadius = UDim.new(0, 6)
-		local s = Instance.new("UIStroke", f)
-		s.Color = THEME.Stroke
-		s.Thickness = 1
+	local still = false
+	for index, info in ipairs(infos) do
+		still = still or info.Uid == selectedUid
 
-		local ic = Instance.new("ImageLabel", f)
-		ic.Size = UDim2.fromOffset(36, 36)
-		ic.Position = UDim2.fromOffset(4, 4)
-		ic.BackgroundTransparency = 1
-		ic.Image = info.Icon or ""
-		ic.ScaleType = Enum.ScaleType.Fit
+		local frame = Instance.new("TextButton", list)
+		frame.Size = UDim2.new(1, 0, 0, 48)
+		frame.BackgroundColor3 = THEME.Card
+		frame.BorderSizePixel = 0
+		frame.Text = ""
+		frame.LayoutOrder = index
+		frame.AutoButtonColor = true
 
-		local nm = Instance.new("TextLabel", f)
-		nm.Size = UDim2.new(1, -48, 0, 20)
-		nm.Position = UDim2.fromOffset(46, 2)
-		nm.BackgroundTransparency = 1
-		nm.Text = info.Name or "?"
-		nm.TextColor3 = RCOL[math.clamp(info.Rarity or 1, 1, #RCOL)] or THEME.Text
-		nm.Font = Enum.Font.GothamBold
-		nm.TextSize = 14
-		nm.TextXAlignment = Enum.TextXAlignment.Left
-		nm.TextTruncate = Enum.TextTruncate.AtEnd
+		Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 8)
 
-		local vl = Instance.new("TextLabel", f)
-		vl.Size = UDim2.new(1, -48, 0, 16)
-		vl.Position = UDim2.fromOffset(46, 24)
-		vl.BackgroundTransparency = 1
-		vl.Text = money(info.Value or 0)
-		vl.TextColor3 = THEME.Soft
-		vl.Font = Enum.Font.GothamMedium
-		vl.TextSize = 12
-		vl.TextXAlignment = Enum.TextXAlignment.Left
+		local fS = Instance.new("UIStroke", frame)
+		fS.Color = THEME.Stroke
+		fS.Thickness = 1
+		fS.Transparency = 0.6
 
-		rows[info.Uid] = { F = f, S = s }
-		f.MouseButton1Click:Connect(function()
-			setSel(info.Uid)
+		local icon = Instance.new("ImageLabel", frame)
+		icon.Size = UDim2.fromOffset(38, 38)
+		icon.Position = UDim2.fromOffset(5, 5)
+		icon.BackgroundTransparency = 1
+		icon.Image = info.Icon or ""
+		icon.ScaleType = Enum.ScaleType.Fit
+
+		local name = Instance.new("TextLabel", frame)
+		name.Size = UDim2.new(1, -52, 0, 22)
+		name.Position = UDim2.fromOffset(50, 4)
+		name.BackgroundTransparency = 1
+		name.Text = info.Name or "?"
+		name.TextColor3 = RARITY_COLORS[math.clamp(info.Rarity or 1, 1, #RARITY_COLORS)] or THEME.Text
+		name.Font = Enum.Font.GothamBold
+		name.TextSize = 15
+		name.TextXAlignment = Enum.TextXAlignment.Left
+		name.TextTruncate = Enum.TextTruncate.AtEnd
+
+		local value = Instance.new("TextLabel", frame)
+		value.Size = UDim2.new(1, -52, 0, 16)
+		value.Position = UDim2.fromOffset(50, 26)
+		value.BackgroundTransparency = 1
+		value.Text = money(info.Value or 0)
+		value.TextColor3 = THEME.AccentSoft
+		value.Font = Enum.Font.GothamMedium
+		value.TextSize = 13
+		value.TextXAlignment = Enum.TextXAlignment.Left
+
+		rows[info.Uid] = { Frame = frame, Stroke = fS }
+
+		frame.MouseButton1Click:Connect(function()
+			setSelected(info.Uid)
 			statusLbl.Text = "選択中: " .. (info.Name or "?")
 		end)
 	end
+	setSelected(still and selectedUid or nil)
 end
 
 local function mkBtn(text, pos, size, color)
-	local b = Instance.new("TextButton", main)
+	local b = Instance.new("TextButton", body)
 	b.Size = size
 	b.Position = pos
 	b.BackgroundColor3 = color
@@ -1137,16 +1288,18 @@ local function mkBtn(text, pos, size, color)
 	b.Font = Enum.Font.GothamBold
 	b.TextSize = 15
 	b.AutoButtonColor = true
-	Instance.new("UICorner", b).CornerRadius = UDim.new(0, 10)
+	b.ZIndex = 6
+	Instance.new("UICorner", b).CornerRadius = UDim.new(0, 12)
 	local s = Instance.new("UIStroke", b)
 	s.Color = THEME.Accent
-	s.Thickness = 1
+	s.Thickness = 1.2
 	s.Transparency = 0.4
 	return b
 end
 
-local refreshBtn = mkBtn("更新", UDim2.new(0, 10, 1, -108), UDim2.new(0.5, -15, 0, 48), THEME.Card)
-local stealBtn = mkBtn("即盗み", UDim2.new(0.5, 5, 1, -108), UDim2.new(0.5, -15, 0, 48), Color3.fromRGB(40, 10, 25))
+local refreshBtn = mkBtn("更新", UDim2.new(0, 0, 1, -60), UDim2.new(0.32, -4, 0, 52), THEME.Card)
+local autoBtn = mkBtn("自動盗み", UDim2.new(0.32, 2, 1, -60), UDim2.new(0.36, -4, 0, 52), Color3.fromRGB(60, 15, 20))
+local instantBtn = mkBtn("即盗み", UDim2.new(0.68, 4, 1, -60), UDim2.new(0.32, -4, 0, 52), Color3.fromRGB(40, 10, 25))
 
 refreshBtn.MouseButton1Click:Connect(function()
 	if not state.Busy then
@@ -1155,7 +1308,21 @@ refreshBtn.MouseButton1Click:Connect(function()
 	end
 end)
 
-stealBtn.MouseButton1Click:Connect(function()
+autoBtn.MouseButton1Click:Connect(function()
+	if state.AutoEnabled then
+		stopAutoSteal()
+		autoBtn.Text = "自動盗み"
+		autoBtn.BackgroundColor3 = Color3.fromRGB(60, 15, 20)
+		statusLbl.Text = "自動盗み停止"
+	else
+		startAutoSteal()
+		autoBtn.Text = "停止"
+		autoBtn.BackgroundColor3 = Color3.fromRGB(140, 20, 30)
+		statusLbl.Text = "自動盗み開始"
+	end
+end)
+
+instantBtn.MouseButton1Click:Connect(function()
 	if state.Busy then
 		state.Cancel = true
 		statusLbl.Text = "キャンセル中..."
@@ -1169,41 +1336,55 @@ stealBtn.MouseButton1Click:Connect(function()
 	end
 end)
 
+minBtn.MouseButton1Click:Connect(function()
+	UI.Minimized = not UI.Minimized
+	if UI.Minimized then
+		TweenService:Create(main, TweenInfo.new(0.25), {Size = UDim2.fromOffset(UI_W, UI_H_MIN)}):Play()
+		task.delay(0.12, function() body.Visible = false end)
+	else
+		body.Visible = true
+		TweenService:Create(main, TweenInfo.new(0.25), {Size = UDim2.fromOffset(UI_W, UI_H)}):Play()
+	end
+end)
+
 closeBtn.MouseButton1Click:Connect(function()
 	state.Cancel = true
 	pcall(fpsOff)
 	pcall(shieldStop)
-	gui:Destroy()
+	gui.Enabled = false
 end)
 
 local drag, dragStart, startPos = false, nil, nil
-hdr.InputBegan:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1 or
-	   input.UserInputType == Enum.UserInputType.Touch then
+header.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1
+		or input.UserInputType == Enum.UserInputType.Touch then
 		drag = true
 		dragStart = input.Position
 		startPos = main.Position
 	end
 end)
-hdr.InputEnded:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1 or
-	   input.UserInputType == Enum.UserInputType.Touch then
+header.InputEnded:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1
+		or input.UserInputType == Enum.UserInputType.Touch then
 		drag = false
 	end
 end)
 UserInputService.InputChanged:Connect(function(input)
 	if not drag then return end
-	if input.UserInputType ~= Enum.UserInputType.MouseMovement and
-	   input.UserInputType ~= Enum.UserInputType.Touch then return end
+	if input.UserInputType ~= Enum.UserInputType.MouseMovement
+		and input.UserInputType ~= Enum.UserInputType.Touch then return end
 	local d = input.Position - dragStart
-	main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X,
-	                          startPos.Y.Scale, startPos.Y.Offset + d.Y)
+	main.Position = UDim2.new(
+		startPos.X.Scale, startPos.X.Offset + d.X,
+		startPos.Y.Scale, startPos.Y.Offset + d.Y)
 end)
 
 task.spawn(function()
 	while gui.Parent do
 		task.wait(CFG.AutoRefresh)
-		if not state.Busy then pcall(rebuild) end
+		if not state.Busy and not state.AutoEnabled then
+			pcall(rebuild)
+		end
 	end
 end)
 
@@ -1211,20 +1392,20 @@ task.spawn(function()
 	while gui.Parent do
 		task.wait(0.3)
 		if state.Busy then
-			stealBtn.Text = "キャンセル"
-			stealBtn.BackgroundColor3 = Color3.fromRGB(80, 30, 30)
+			instantBtn.Text = "実行中..."
+			instantBtn.BackgroundColor3 = Color3.fromRGB(80, 30, 30)
 		else
-			stealBtn.Text = "即盗み"
-			stealBtn.BackgroundColor3 = Color3.fromRGB(40, 10, 25)
+			instantBtn.Text = "即盗み"
+			instantBtn.BackgroundColor3 = Color3.fromRGB(40, 10, 25)
 		end
 	end
 end)
 
 task.spawn(function()
-	task.wait(0.5)
+	task.wait(0.3)
 	pcall(rebuild)
 end)
 
 shieldStart()
 
-print("[ShouyuHub] 起動完了")
+print("[ShouyuHub] 起動完了 / 速度 " .. CFG.SpeedToEgg)
