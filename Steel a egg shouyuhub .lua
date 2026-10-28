@@ -1,4 +1,4 @@
--- ShouyuHub | Instant TP
+-- ShouyuHub | Steal an Egg (Light Blue)
 local Players           = game:GetService("Players")
 local RunService        = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -9,38 +9,25 @@ local localPlayer       = Players.LocalPlayer
 local IS_MOBILE         = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
 
 local CFG = {
-	SpeedToEgg   = 3000,
-	SpeedCap     = 1.15,
-	HopRatio     = 1.515,
-	HopMin       = 40,
-	HopGap       = 0.06,
-	HopGapMin    = 0.06,
-	HopGapMax    = 0.2,
-	HopRetries   = 6,
-	HopLift      = 42,
-	LandOffset   = 14,
-	LandSettle   = 0.08,
-	DropDelay    = 0.05,
+	SpeedToEgg   = 6500,   -- ★ 行く時の速度
+	SpeedHome    = 300,    -- ★ 帰る時の速度 (Instant TPなし)
 	GrabInterval = 0.03,
 	RegrabFar    = 40,
 	Height       = 70,
 	ClimbShare   = 0.5,
-	CarryRatio   = 0.9,
-	EasyRatio    = 1.3,
 	AutoRefresh  = 4,
 }
-local FPS = { 60, 30, 0.15 }
 
 local THEME = {
-	Bg          = Color3.fromRGB(18, 6, 8),
-	Panel       = Color3.fromRGB(28, 8, 12),
-	Card        = Color3.fromRGB(34, 10, 14),
-	Accent      = Color3.fromRGB(220, 40, 60),
-	AccentSoft  = Color3.fromRGB(255, 140, 150),
-	AccentDeep  = Color3.fromRGB(90, 12, 22),
-	Text        = Color3.fromRGB(240, 230, 232),
-	TextDim     = Color3.fromRGB(180, 150, 155),
-	Stroke      = Color3.fromRGB(80, 30, 40),
+	Bg         = Color3.fromRGB(15, 20, 30),
+	Panel      = Color3.fromRGB(25, 35, 50),
+	Card       = Color3.fromRGB(35, 50, 70),
+	Accent     = Color3.fromRGB(120, 220, 255), -- 薄水色
+	AccentSoft = Color3.fromRGB(200, 240, 255),
+	AccentDeep = Color3.fromRGB(40, 100, 140),
+	Text       = Color3.fromRGB(240, 245, 255),
+	TextDim    = Color3.fromRGB(160, 190, 210),
+	Stroke     = Color3.fromRGB(60, 100, 130),
 }
 
 local function safeRequire(getter)
@@ -210,13 +197,8 @@ local function shieldStop()
 	if shield.Connection then shield.Connection:Disconnect(); shield.Connection = nil end
 	if shield.Added then shield.Added:Disconnect(); shield.Added = nil end
 	shieldUndo()
-endlocal state = {
-	Carrying = false, Uid = nil, Delivered = 0,
-	Busy = false, Cancel = false, Mult = 1,
-	PulledAt = 0, HeldSeen = 0, GuessedDrop = false,
-	ReleaseCamera = nil,
-	AutoEnabled = false, AutoRunning = false,
-}
+end------------------------------------------------------------------ ステート
+local state = { Carrying = false, Uid = nil, Delivered = 0, Busy = false, Cancel = false, Mult = 1, HeldSeen = 0, GuessedDrop = false }
 
 if type(EggState) == "table" and type(EggState.CarryChanged) == "table" and type(EggState.CarryChanged.Connect) == "function" then
 	EggState.CarryChanged:Connect(function(arg)
@@ -236,14 +218,6 @@ end
 pcall(function()
 	remote("RE/EggWorld/FieldEggRedeemVerdict").OnClientEvent:Connect(function()
 		state.Delivered = os.clock()
-	end)
-end)
-
-pcall(function()
-	remote("RE/RigSync/Refresh").OnClientEvent:Connect(function(arg)
-		if type(arg) == "table" and arg.Action == "Relocate" then
-			state.PulledAt = os.clock()
-		end
 	end)
 end)
 
@@ -323,9 +297,7 @@ end
 
 local function eggPosition(uid)
 	for _, record in ipairs(snapshot()) do
-		if record.Uid == uid then
-			return record.BottomCFrame.Position
-		end
+		if record.Uid == uid then return record.BottomCFrame.Position end
 	end
 	return nil
 end
@@ -333,12 +305,7 @@ end
 local function describe(record)
 	local directory = type(Assets) == "table" and Assets.Directory or nil
 	local entry = type(directory) == "table" and directory[tostring(record.AssetCategory)] or nil
-	local info = {
-		Uid = record.Uid,
-		Category = tostring(record.AssetCategory),
-		Name = tostring(record.AssetCategory),
-		Icon = "", Rarity = 0, Value = 0,
-	}
+	local info = { Uid = record.Uid, Category = tostring(record.AssetCategory), Name = tostring(record.AssetCategory), Icon = "", Rarity = 0, Value = 0 }
 	if type(entry) == "table" then
 		info.Name = tostring(entry.DisplayName or record.AssetCategory)
 		local icon = entry.Icon
@@ -364,81 +331,9 @@ end
 local function money(value)
 	local units = { { 1e12, "T" }, { 1e9, "B" }, { 1e6, "M" }, { 1e3, "K" } }
 	for _, u in ipairs(units) do
-		if value >= u[1] then
-			return string.format("$%.2f%s/s", value / u[1], u[2])
-		end
+		if value >= u[1] then return string.format("$%.2f%s/s", value / u[1], u[2]) end
 	end
 	return string.format("$%d/s", math.floor(value + 0.5))
-	end------------------------------------------------------------------ Instant TP logic
-local status = function(text) end
-
-local function frozenCamera()
-	local camera = workspace.CurrentCamera
-	if not camera then return function() end end
-	local oldType = camera.CameraType
-	local frame = camera.CFrame
-	pcall(function()
-		camera.CameraType = Enum.CameraType.Scriptable
-		camera.CFrame = frame
-	end)
-	return function()
-		pcall(function() camera.CameraType = oldType end)
-	end
-end
-
-local fpsGen = 0
-local function fpsOn()
-	if typeof(setfpscap) ~= "function" then return end
-	fpsGen += 1
-	local mine = fpsGen
-	task.spawn(function()
-		local high = true
-		local started = os.clock()
-		while fpsGen == mine and os.clock() - started < 60 do
-			pcall(setfpscap, high and FPS[1] or FPS[2])
-			high = not high
-			task.wait(FPS[3])
-		end
-	end)
-end
-
-local function fpsOff()
-	fpsGen += 1
-	if typeof(setfpscap) == "function" then
-		pcall(setfpscap, 240)
-	end
-end
-
-local stealClone = nil
-local function dropClone()
-	local copy = stealClone
-	stealClone = nil
-	if copy then pcall(function() copy:Destroy() end) end
-end
-
-local function postClone()
-	dropClone()
-	local character = localPlayer.Character
-	if not character then return end
-	local was = character.Archivable
-	character.Archivable = true
-	local copy = character:Clone()
-	character.Archivable = was
-	if copy then
-		for _, d in ipairs(copy:GetDescendants()) do
-			if d:IsA("LuaSourceContainer") or d:IsA("Humanoid") then
-				pcall(function() d:Destroy() end)
-			elseif d:IsA("BasePart") then
-				d.Anchored = true
-				d.CanCollide = false
-				d.CanTouch = false
-				d.CanQuery = false
-			end
-		end
-		copy.Name = "Clone"
-		copy.Parent = workspace
-		stealClone = copy
-	end
 end
 
 local function lineInfo()
@@ -456,12 +351,8 @@ local function homePoint()
 		{ { "__OBJECTS", "Machines", "RiftMachine", "Rift", "Meshes/VoidPortal_Cube.003" }, Vector3.new(-26.776, 1.75, 18.665) },
 	}) do
 		local node = workspace
-		for _, name in ipairs(def[1]) do
-			node = node and node:FindFirstChild(name) or nil
-		end
-		if node and node:IsA("BasePart") then
-			return node.CFrame:PointToWorldSpace(def[2])
-		end
+		for _, name in ipairs(def[1]) do node = node and node:FindFirstChild(name) or nil end
+		if node and node:IsA("BasePart") then return node.CFrame:PointToWorldSpace(def[2]) end
 	end
 	return Vector3.new(528.7, 70.57, -364.11)
 end
@@ -497,16 +388,11 @@ local function dangers()
 	local function bad(name)
 		if name == "ScrambleLocalVisuals" or name == "DrScrambleEvent" then return false end
 		name = string.lower(name)
-		return string.find(name, "portal", 1, true)
-			or string.find(name, "teleport", 1, true)
-			or string.find(name, "mech", 1, true)
-			or string.find(name, "arena", 1, true)
-			or string.find(name, "scramble", 1, true)
+		return string.find(name, "portal", 1, true) or string.find(name, "teleport", 1, true) or string.find(name, "mech", 1, true) or string.find(name, "arena", 1, true) or string.find(name, "scramble", 1, true)
 	end
 	for _, child in ipairs(workspace:GetChildren()) do
 		if (child:IsA("Model") or child:IsA("BasePart") or child:IsA("Folder")) and bad(child.Name) then
-			if child:IsA("Folder") then
-				for _, inner in ipairs(child:GetChildren()) do add(inner) end
+			if child:IsA("Folder") then for _, inner in ipairs(child:GetChildren()) do add(inner) end
 			else add(child) end
 		end
 	end
@@ -514,9 +400,7 @@ local function dangers()
 	build = build and build:FindFirstChild("Build")
 	if build then
 		for _, child in ipairs(build:GetChildren()) do
-			if bad(child.Name) then
-				for _, inner in ipairs(child:GetChildren()) do add(inner) end
-			end
+			if bad(child.Name) then for _, inner in ipairs(child:GetChildren()) do add(inner) end end
 		end
 	end
 	dangerCache = list
@@ -529,10 +413,7 @@ local function avoid(from, to)
 		local inside = from.X >= x0 and from.X <= x1 and from.Z >= z0 and from.Z <= z1
 		if not inside then
 			local t0, t1, hit = 0, 1, true
-			for _, axis in ipairs({
-				{ from.X, to.X - from.X, x0, x1 },
-				{ from.Z, to.Z - from.Z, z0, z1 },
-			}) do
+			for _, axis in ipairs({ { from.X, to.X - from.X, x0, x1 }, { from.Z, to.Z - from.Z, z0, z1 } }) do
 				local pos, delta, lo, hi = axis[1], axis[2], axis[3], axis[4]
 				if math.abs(delta) < 1e-6 then
 					if pos < lo or pos > hi then hit = false end
@@ -556,7 +437,11 @@ local function avoid(from, to)
 		end
 	end
 	return to
-		endlocal function runToEgg(uid, egg)
+	end------------------------------------------------------------------ 走りロジック
+local status = function(text) end
+
+-- 卵へ走る（速度6500）
+local function runToEgg(uid, egg)
 	local lineX = lineInfo()
 	local home = homePoint()
 	local character = localPlayer.Character
@@ -585,17 +470,24 @@ local function avoid(from, to)
 		if stage == "safe" then
 			if Vector3.new(home.X - r.Position.X, 0, home.Z - r.Position.Z).Magnitude <= 6 then
 				stage = "field"
-			else target = home end
+			else
+				target = home
+			end
 		end
 
 		local waypoint = avoid(r.Position, target)
 		local flat = Vector3.new(waypoint.X - r.Position.X, 0, waypoint.Z - r.Position.Z)
 		local unit = flat.Magnitude > 0.01 and flat.Unit or Vector3.zero
+		
+		-- ★ 行く時の速度（6500）
 		local speed = CFG.SpeedToEgg
 		local v = unit * math.min(speed, flat.Magnitude / 0.05)
+		
 		pcall(function()
 			r.AssemblyLinearVelocity = Vector3.new(v.X, r.AssemblyLinearVelocity.Y, v.Z)
-			if humanoid and unit.Magnitude > 0 then humanoid:Move(unit, false) end
+			if humanoid and unit.Magnitude > 0 then
+				humanoid:Move(unit, false)
+			end
 		end)
 
 		if os.clock() - lastCheck >= 1.5 then
@@ -622,127 +514,59 @@ local function avoid(from, to)
 	return state.Carrying or (r ~= nil and Vector3.new(egg.X - r.Position.X, 0, egg.Z - r.Position.Z).Magnitude <= 6)
 end
 
-local function eggNow(uid, cache)
-	local node = workspace:FindFirstChild(uid)
-	local slots = workspace:FindFirstChild("AreaEggSlotsClient")
-	node = node or (slots and slots:FindFirstChild(uid))
-	if node then
-		local ok, pos = pcall(function() return node:GetPivot().Position end)
-		if ok and pos then cache.Pos, cache.At = pos, os.clock(); return pos end
-	end
-	if os.clock() - cache.At >= 0.5 then
-		cache.At = os.clock()
-		cache.Pos = eggPosition(uid) or cache.Pos
-	end
-	return cache.Pos
-end
-
+-- 卵を掴む
 local function grab(uid, timeout)
 	local cache = { At = 0 }
 	local waited, since = 0, 1
 	while not state.Carrying and waited < timeout and not state.Cancel do
 		local r = root()
-		local egg = eggNow(uid, cache)
-		local dt = math.max(RunService.Heartbeat:Wait(), 1 / 240)
-		waited += dt
-		since += dt
+		local egg = eggPosition(uid)
 		if r and egg then
-			local delta = egg - r.Position
-			if delta.Magnitude > 2 then
-				local pace = math.max(walkSpeed() * CFG.SpeedCap, 16)
-				local v = delta / math.max(0.08, dt)
-				if v.Magnitude > pace then v = v.Unit * pace end
+			local flat = Vector3.new(egg.X - r.Position.X, 0, egg.Z - r.Position.Z)
+			if flat.Magnitude > 2 then
+				local v = flat.Unit * math.min(walkSpeed() * 1.15, flat.Magnitude / 0.05)
 				pcall(function()
-					r.AssemblyLinearVelocity = v + Vector3.new(0, workspace.Gravity * dt * 0.5, 0)
-					r.AssemblyAngularVelocity = Vector3.zero
+					r.AssemblyLinearVelocity = Vector3.new(v.X, r.AssemblyLinearVelocity.Y, v.Z)
 				end)
 			end
-			if since >= CFG.GrabInterval then
-				since = 0
+		end
+
+		if since >= CFG.GrabInterval then
+			since = 0
+			local r2 = root()
+			if r2 and egg then
 				local prompt = promptNear(egg - Vector3.new(0, 3, 0), 10)
 				if prompt and typeof(fireproximityprompt) == "function" then
 					pcall(function() prompt.HoldDuration = 0 end)
 					pcall(fireproximityprompt, prompt)
 				end
-				task.spawn(takeEgg, uid)
 			end
-		elseif since >= CFG.GrabInterval then
-			since = 0
 			task.spawn(takeEgg, uid)
 		end
+		
+		local dt = math.max(RunService.Heartbeat:Wait(), 1/240)
+		waited += dt
+		since += dt
 	end
-	local r = root()
-	if r then pcall(function() r.AssemblyLinearVelocity = Vector3.zero end) end
 	return state.Carrying and state.Uid == uid
 end
 
-local function regrab(uid)
-	if state.Carrying then return true end
-	local r = root()
-	local egg = eggPosition(uid)
-	if r and egg and Vector3.new(r.Position.X - egg.X, 0, r.Position.Z - egg.Z).Magnitude > CFG.RegrabFar then
-		status("The egg fell far behind, teleporting onto it")
-		place(egg + Vector3.new(0, 3, 0))
-	else
-		status("The egg fell close, taking it back")
-	end
-	return grab(uid, 3)
-end
-
-local function groundY(position, fallback)
-	local y = fallback
-	pcall(function()
-		local params = RaycastParams.new()
-		params.FilterType = Enum.RaycastFilterType.Exclude
-		params.FilterDescendantsInstances = { localPlayer.Character }
-		params.IgnoreWater = true
-		local hit = workspace:Raycast(position + Vector3.new(0, 60, 0), Vector3.new(0, -140, 0), params)
-		if hit and hit.Material ~= Enum.Material.Water and math.abs(hit.Position.Y - fallback) < 40 then
-			y = hit.Position.Y + 3.5
-		end
-	end)
-	return y
-end
-
-local function carrySpeed(distance)
-	local ws = walkSpeed()
-	local base = ws * math.min(CFG.CarryRatio, CFG.SpeedCap) * state.Mult
-	local fast = base * 1.5
-	local excess = 5.5 * base
-	local limit = fast
-	if distance and distance > excess then
-		limit = math.min(fast, base * distance / (distance - excess))
-	end
-	return math.min(math.max(math.min(base * CFG.EasyRatio, limit), base), math.max(ws * CFG.SpeedCap, base))
-end
-
+-- 帰る（Instant TPなし / 速度300）
 local function runHome(lineX, laneZ)
 	local started = os.clock()
 	local home = homePoint()
-	local checkpoint = lineX - 7
-	local height = CFG.Height
-	local share = math.clamp(CFG.ClimbShare, 0.1, 0.9)
-	local descent = height * math.sqrt(1 - share * share) / share
 	local character = localPlayer.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 	if humanoid then humanoid.PlatformStand = false end
 
 	local r = root()
-	if r and character and height > 0.5 and home.Y + height - 2 > r.Position.Y then
-		pcall(function()
-			character:PivotTo(CFrame.new(Vector3.new(r.Position.X, home.Y + height, r.Position.Z)) * r.CFrame.Rotation)
-			r.AssemblyLinearVelocity = Vector3.zero
-			r.AssemblyAngularVelocity = Vector3.zero
-		end)
-	end
-
-	local start = root()
-	local speed = carrySpeed(start and (Vector3.new(start.Position.X - home.X, 0, start.Position.Z - home.Z).Magnitude + math.max(0, height) * 2) or nil)
+	if not r then return false end
 
 	local last = os.clock()
 	local timeout = 0
 	status("Safe zone")
-	while state.Carrying and state.Delivered < started and not state.Cancel and timeout < 25 do
+	
+	while state.Carrying and state.Delivered < started and not state.Cancel and timeout < 30 do
 		r = root()
 		if not r then return false end
 		local now = os.clock()
@@ -750,20 +574,33 @@ local function runHome(lineX, laneZ)
 		last = now
 		timeout += dt
 
-		local toHome = r.Position.X <= checkpoint + 2
-		local target = toHome and home or Vector3.new(checkpoint, home.Y, laneZ)
-		if toHome and Vector3.new(home.X - r.Position.X, 0, home.Z - r.Position.Z).Magnitude < 2 then break end
+		-- ゴールとの距離
+		local target = home
+		if r.Position.X > lineX then
+			-- 境界線を越えるまではチェックポイント（境界線の手前）を目指す
+			target = Vector3.new(lineX - 5, home.Y, laneZ)
+		end
+
+		if (r.Position - target).Magnitude < 5 then
+			if target == home then break end
+		end
+
 		local aim = avoid(r.Position, target)
 		local flat = Vector3.new(aim.X - r.Position.X, 0, aim.Z - r.Position.Z)
-		local remaining = toHome and 0 or math.max(0, r.Position.X - checkpoint)
-		local wantY = home.Y + height
-		if toHome or remaining <= descent then
-			wantY = home.Y + height * math.clamp(remaining / math.max(descent, 1), 0, 1)
-		end
-		local vy = math.clamp((wantY - r.Position.Y) / 0.12, -speed * share, speed * share)
-		local horizontal = math.sqrt(math.max(speed * speed - vy * vy, 0))
-		local v = flat.Magnitude > 0.01 and flat.Unit * math.min(horizontal, flat.Magnitude / 0.05) or Vector3.zero
-		pcall(function() r.AssemblyLinearVelocity = Vector3.new(v.X, vy, v.Z) end)
+		local unit = flat.Magnitude > 0.01 and flat.Unit or Vector3.zero
+		
+		-- ★ 帰りは直線移動（速度300）
+		local speed = CFG.SpeedHome
+		local v = unit * math.min(speed, flat.Magnitude / 0.05)
+		
+		pcall(function()
+			-- 宙を浮かないようにY座標はグラウンドに合わせるか、Humanoidの移動に任せる
+			r.AssemblyLinearVelocity = Vector3.new(v.X, r.AssemblyLinearVelocity.Y, v.Z)
+			if humanoid and unit.Magnitude > 0 then
+				humanoid:Move(unit, false)
+			end
+		end)
+		
 		RunService.Heartbeat:Wait()
 	end
 
@@ -782,120 +619,9 @@ local function runHome(lineX, laneZ)
 		end
 	end
 	return state.Delivered >= started
-			endlocal function instantTP(uid)
-	local started = os.clock()
-	local lineX, lineY = lineInfo()
-	local r = root()
-	if not r then return false end
-	local laneZ = math.clamp(r.Position.Z, -425, -300)
-	local landing = Vector3.new(lineX + CFG.LandOffset, lineY + 3.35, laneZ)
-
-	local hopStep = math.max(walkSpeed() * CFG.HopRatio, CFG.HopMin)
-	local hopY = r.Position.Y + CFG.HopLift
-	local x = r.Position.X
-	local retries = 0
-	local releaseCamera = frozenCamera()
-	state.ReleaseCamera = releaseCamera
-	pcall(postClone)
-	fpsOn()
-
-	while x - hopStep > landing.X and not state.Cancel do
-		if not state.Carrying then
-			if not regrab(uid) then break end
-			local current = root()
-			if current then x = math.min(x, current.Position.X) end
-			continue
-		end
-
-		local nextX = x - hopStep
-		status(string.format("Instant TP: hopping home, X %d", math.floor(nextX)))
-		local pulledBefore = state.PulledAt
-		local held = 0
-		while held < CFG.HopGap do
-			place(Vector3.new(nextX, hopY, laneZ))
-			held += RunService.Heartbeat:Wait()
-		end
-
-		local check = root()
-		local pulled = state.PulledAt > pulledBefore or (check ~= nil and (check.Position.X - nextX > 10 or check.AssemblyLinearVelocity.Magnitude > 150))
-		if pulled and state.Carrying and not state.Cancel then
-			retries += 1
-			CFG.HopGap = math.min(CFG.HopGapMax, CFG.HopGap + 0.02)
-			if retries > CFG.HopRetries then break end
-			status(string.format("Instant TP: pulled back, retry %d/%d", retries, CFG.HopRetries))
-			local settle = 0
-			while settle < 0.12 and not state.Cancel do
-				place(Vector3.new(x, hopY, laneZ))
-				settle += RunService.Heartbeat:Wait()
-			end
-		else
-			x = nextX
-			CFG.HopGap = math.max(CFG.HopGapMin, CFG.HopGap - 0.01)
-		end
-	end
-
-	status("Instant TP: landing next to the line")
-	landing = Vector3.new(landing.X, groundY(landing, landing.Y), landing.Z)
-	local function land()
-		local current = root()
-		if current and current.Position.X <= landing.X + 1 and current.Position.Y > landing.Y - 25 then
-			pcall(function() current.AssemblyLinearVelocity = Vector3.zero end)
-			return
-		end
-		place(landing)
-	end
-	land()
-	for attempt = 1, 3 do
-		local settle = 0
-		while settle < CFG.LandSettle and not state.Cancel do
-			settle += RunService.Heartbeat:Wait()
-		end
-		local landed = root()
-		if state.Carrying and landed and (landed.Position.X - landing.X > 12 or landed.Position.Y < landing.Y - 25) then
-			status("Instant TP: landing retry " .. attempt)
-			land()
-		else break end
-	end
-	dropClone()
-
-	if state.Carrying and not state.Cancel then
-		local delay = 0
-		while delay < CFG.DropDelay do
-			delay += RunService.Heartbeat:Wait()
-		end
-		status("Instant TP: dropping the egg")
-		dropEgg()
-		local waited = 0
-		while state.Carrying and waited < 1 and not state.Cancel do
-			waited += RunService.Heartbeat:Wait()
-		end
-		local current = root()
-		if current then
-			pcall(function()
-				current.AssemblyLinearVelocity = Vector3.zero
-				current.AssemblyAngularVelocity = Vector3.zero
-			end)
-		end
-		releaseCamera()
-		dropClone()
-		status("Instant TP: taking the egg back")
-		if not grab(uid, 3) and not regrab(uid) then
-			fpsOff()
-			status("Could not take the egg back")
-			return false
-		end
-		dropClone()
-	end
-	releaseCamera()
-
-	local ok = false
-	if state.Carrying then
-		ok = runHome(lineX, laneZ)
-	end
-	fpsOff()
-	return ok or state.Delivered >= started
 end
 
+-- 盗んで納品
 local function stealAndDeliver(uid)
 	if state.Busy then return end
 	state.Busy = true
@@ -915,101 +641,49 @@ local function stealAndDeliver(uid)
 					waited += RunService.Heartbeat:Wait()
 				end
 			end
-			fpsOn()
+			
 			status("Going to the egg")
 			if not runToEgg(uid, egg) then
-				fpsOff()
 				status("Could not reach the egg")
 				return
 			end
+			
 			status("Taking the egg")
 			if not grab(uid, 4) then
-				fpsOff()
 				status("The egg would not come free")
 				return
 			end
-			local delivered = instantTP(uid)
+			
+			local lineX, _ = lineInfo()
+			local current = root()
+			local laneZ = current and math.clamp(current.Position.Z, -425, -300) or -360
+			
+			local delivered = runHome(lineX, laneZ)
 			status(delivered and "Delivered" or "Delivery failed")
 		end)
-		fpsOff()
-		dropClone()
-		if state.ReleaseCamera then
-			pcall(state.ReleaseCamera)
-			state.ReleaseCamera = nil
-		end
+		
 		if not ok then
 			status("Error: " .. tostring(err))
 		end
 		state.Busy = false
 	end)
-end
-
-local autoStealThread = nil
-
-function startAutoSteal()
-	if state.AutoRunning then return end
-	state.AutoEnabled = true
-	state.AutoRunning = true
-	autoStealThread = task.spawn(function()
-		while state.AutoEnabled do
-			if not state.Busy then
-				local records = snapshot()
-				local best, bestInfo = nil, nil
-				for _, record in ipairs(records) do
-					local info = describe(record)
-					if not bestInfo or info.Value > bestInfo.Value then
-						best, bestInfo = record, info
-					end
-				end
-				if best then
-					status("Auto: " .. bestInfo.Name)
-					stealAndDeliver(best.Uid)
-				end
-			end
-			task.wait(1.5)
-		end
-		state.AutoRunning = false
-	end)
-end
-
-function stopAutoSteal()
-	state.AutoEnabled = false
-	state.Cancel = true
-	if autoStealThread then
-		pcall(task.cancel, autoStealThread)
-		autoStealThread = nil
-	end
-	state.AutoRunning = false
-				end-- ============================================================
--- PART 6/6 - UI（自作）
--- ============================================================
-
+		end------------------------------------------------------------------ UI構築
 print("[ShouyuHub] UI構築開始")
 
 local UI = { W = 340, H = 500, Scale = 1, Minimized = false }
 local UI_W, UI_H, UI_H_MIN = UI.W, UI.H, 68
 
 local function getParent()
-	local pg = localPlayer:FindFirstChildOfClass("PlayerGui")
-	if pg then return pg end
-	if type(gethui) == "function" then
-		local ok, r = pcall(gethui)
-		if ok and typeof(r) == "Instance" then return r end
-	end
-	return CoreGui
+	return localPlayer:WaitForChild("PlayerGui")
 end
 
 local gui = Instance.new("ScreenGui")
-gui.Name = "ShouyuHub_" .. tostring(math.random(1000, 9999))
+gui.Name = "ShouyuHub_LightBlue"
 gui.ResetOnSpawn = false
 gui.IgnoreGuiInset = true
 gui.DisplayOrder = 999999
 gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 gui.Enabled = true
-
-if type(syn) == "table" and type(syn.protect_gui) == "function" then
-	pcall(syn.protect_gui, gui)
-end
 
 local parent = getParent()
 if parent then
@@ -1018,13 +692,6 @@ if parent then
 		local pg = localPlayer:WaitForChild("PlayerGui", 5)
 		if pg then gui.Parent = pg end
 	end
-end
-
-print("[ShouyuHub] GUI Parent:", gui.Parent and gui.Parent:GetFullName() or "nil")
-
-local vp = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(1280, 720)
-if IS_MOBILE then
-	UI.Scale = math.min(vp.X * 0.92 / UI_W, vp.Y * 0.80 / UI_H, 1)
 end
 
 local main = Instance.new("Frame", gui)
@@ -1045,6 +712,7 @@ stroke.Color = THEME.Accent
 stroke.Thickness = 1.5
 stroke.Transparency = 0.25
 
+-- 背景
 local bg = Instance.new("Frame", main)
 bg.Size = UDim2.fromScale(1, 1)
 bg.BackgroundColor3 = THEME.AccentDeep
@@ -1057,9 +725,10 @@ bgG.Rotation = 90
 bgG.Color = ColorSequence.new({
 	ColorSequenceKeypoint.new(0, THEME.AccentDeep),
 	ColorSequenceKeypoint.new(0.5, THEME.Bg),
-	ColorSequenceKeypoint.new(1, Color3.fromRGB(5, 2, 3)),
+	ColorSequenceKeypoint.new(1, Color3.fromRGB(5, 10, 15)),
 })
 
+-- ヘッダー
 local header = Instance.new("Frame", main)
 header.Size = UDim2.new(1, -16, 0, 56)
 header.Position = UDim2.fromOffset(8, 8)
@@ -1070,10 +739,11 @@ header.ZIndex = 5
 Instance.new("UICorner", header).CornerRadius = UDim.new(0, 10)
 
 local hS = Instance.new("UIStroke", header)
-hS.Color = Color3.fromRGB(120, 12, 20)
+hS.Color = THEME.Accent
 hS.Thickness = 1.2
 hS.Transparency = 0.35
 
+-- ★ キャラクターパネル（アバター）
 local avatarFrame = Instance.new("Frame", header)
 avatarFrame.Size = UDim2.fromOffset(40, 40)
 avatarFrame.Position = UDim2.fromOffset(8, 8)
@@ -1110,7 +780,7 @@ local sub = Instance.new("TextLabel", header)
 sub.Size = UDim2.new(1, -150, 0, 14)
 sub.Position = UDim2.fromOffset(58, 30)
 sub.BackgroundTransparency = 1
-sub.Text = "STEAL AN EGG - " .. tostring(CFG.SpeedToEgg)
+sub.Text = "GO: 6500 / RETURN: 300"
 sub.TextColor3 = THEME.TextDim
 sub.Font = Enum.Font.GothamBold
 sub.TextSize = 10
@@ -1143,6 +813,7 @@ closeBtn.AutoButtonColor = true
 closeBtn.ZIndex = 6
 Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 8)
 
+-- ボディ
 local body = Instance.new("Frame", main)
 body.Size = UDim2.new(1, -16, 1, -72)
 body.Position = UDim2.fromOffset(8, 72)
@@ -1153,7 +824,7 @@ local statusLbl = Instance.new("TextLabel", body)
 statusLbl.Size = UDim2.new(1, -110, 0, 22)
 statusLbl.Position = UDim2.fromOffset(6, 0)
 statusLbl.BackgroundTransparency = 1
-statusLbl.Text = "速度: " .. CFG.SpeedToEgg .. " / 待機中"
+statusLbl.Text = "待機中"
 statusLbl.TextColor3 = THEME.TextDim
 statusLbl.Font = Enum.Font.GothamMedium
 statusLbl.TextSize = 12
@@ -1231,7 +902,6 @@ local function rebuild()
 		frame.Text = ""
 		frame.LayoutOrder = index
 		frame.AutoButtonColor = true
-
 		Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 8)
 
 		local fS = Instance.new("UIStroke", frame)
@@ -1297,28 +967,13 @@ local function mkBtn(text, pos, size, color)
 	return b
 end
 
-local refreshBtn = mkBtn("更新", UDim2.new(0, 0, 1, -60), UDim2.new(0.32, -4, 0, 52), THEME.Card)
-local autoBtn = mkBtn("自動盗み", UDim2.new(0.32, 2, 1, -60), UDim2.new(0.36, -4, 0, 52), Color3.fromRGB(60, 15, 20))
-local instantBtn = mkBtn("即盗み", UDim2.new(0.68, 4, 1, -60), UDim2.new(0.32, -4, 0, 52), Color3.fromRGB(40, 10, 25))
+local refreshBtn = mkBtn("更新", UDim2.new(0, 0, 1, -60), UDim2.new(0.4, -3, 0, 52), THEME.Card)
+local instantBtn = mkBtn("即盗み", UDim2.new(0.4, 3, 1, -60), UDim2.new(0.6, -3, 0, 52), THEME.AccentDeep)
 
 refreshBtn.MouseButton1Click:Connect(function()
 	if not state.Busy then
 		rebuild()
 		statusLbl.Text = "更新完了"
-	end
-end)
-
-autoBtn.MouseButton1Click:Connect(function()
-	if state.AutoEnabled then
-		stopAutoSteal()
-		autoBtn.Text = "自動盗み"
-		autoBtn.BackgroundColor3 = Color3.fromRGB(60, 15, 20)
-		statusLbl.Text = "自動盗み停止"
-	else
-		startAutoSteal()
-		autoBtn.Text = "停止"
-		autoBtn.BackgroundColor3 = Color3.fromRGB(140, 20, 30)
-		statusLbl.Text = "自動盗み開始"
 	end
 end)
 
@@ -1349,42 +1004,35 @@ end)
 
 closeBtn.MouseButton1Click:Connect(function()
 	state.Cancel = true
-	pcall(fpsOff)
-	pcall(shieldStop)
-	gui.Enabled = false
+	shieldStop()
+	gui:Destroy()
 end)
 
+-- ドラッグ
 local drag, dragStart, startPos = false, nil, nil
 header.InputBegan:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1
-		or input.UserInputType == Enum.UserInputType.Touch then
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 		drag = true
 		dragStart = input.Position
 		startPos = main.Position
 	end
 end)
 header.InputEnded:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1
-		or input.UserInputType == Enum.UserInputType.Touch then
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
 		drag = false
 	end
 end)
 UserInputService.InputChanged:Connect(function(input)
 	if not drag then return end
-	if input.UserInputType ~= Enum.UserInputType.MouseMovement
-		and input.UserInputType ~= Enum.UserInputType.Touch then return end
+	if input.UserInputType ~= Enum.UserInputType.MouseMovement and input.UserInputType ~= Enum.UserInputType.Touch then return end
 	local d = input.Position - dragStart
-	main.Position = UDim2.new(
-		startPos.X.Scale, startPos.X.Offset + d.X,
-		startPos.Y.Scale, startPos.Y.Offset + d.Y)
+	main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
 end)
 
 task.spawn(function()
 	while gui.Parent do
 		task.wait(CFG.AutoRefresh)
-		if not state.Busy and not state.AutoEnabled then
-			pcall(rebuild)
-		end
+		if not state.Busy then pcall(rebuild) end
 	end
 end)
 
@@ -1392,11 +1040,11 @@ task.spawn(function()
 	while gui.Parent do
 		task.wait(0.3)
 		if state.Busy then
-			instantBtn.Text = "実行中..."
+			instantBtn.Text = "キャンセル"
 			instantBtn.BackgroundColor3 = Color3.fromRGB(80, 30, 30)
 		else
 			instantBtn.Text = "即盗み"
-			instantBtn.BackgroundColor3 = Color3.fromRGB(40, 10, 25)
+			instantBtn.BackgroundColor3 = THEME.AccentDeep
 		end
 	end
 end)
@@ -1407,5 +1055,4 @@ task.spawn(function()
 end)
 
 shieldStart()
-
-print("[ShouyuHub] 起動完了 / 速度 " .. CFG.SpeedToEgg)
+print("[ShouyuHub] 起動完了")
