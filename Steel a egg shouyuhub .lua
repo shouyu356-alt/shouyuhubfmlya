@@ -1,4 +1,4 @@
--- ShouyuHub | Steal an Egg (Light Blue) - Fixed & Scaled
+-- ShouyuHub | Complete Rebuild with Anti-Cheat Evasion
 local Players           = game:GetService("Players")
 local RunService        = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -7,16 +7,17 @@ local TweenService      = game:GetService("TweenService")
 local CoreGui           = game:GetService("CoreGui")
 local localPlayer       = Players.LocalPlayer
 
+-- ★ 速度設定
 local CFG = {
-	SpeedToEgg   = 6500,
-	SpeedHome    = 500,
+	SpeedToEgg   = 6500,   -- 行く時
+	SpeedHome    = 500,    -- 帰る時 (★500に変更済み)
 	GrabInterval = 0.03,
 	RegrabFar    = 40,
 	Height       = 70,
-	ClimbShare   = 0.5,
 	AutoRefresh  = 4,
 }
 
+-- 薄水色テーマ
 local THEME = {
 	Bg         = Color3.fromRGB(15, 20, 30),
 	Panel      = Color3.fromRGB(25, 35, 50),
@@ -92,11 +93,8 @@ local groundedStates = {
 	[Enum.HumanoidStateType.RunningNoPhysics] = true,
 	[Enum.HumanoidStateType.Landed] = true,
 }
-
 local function grounded(humanoid)
-	if not humanoid or humanoid.Health <= 0 or humanoid.FloorMaterial == Enum.Material.Air then
-		return false
-	end
+	if not humanoid or humanoid.Health <= 0 or humanoid.FloorMaterial == Enum.Material.Air then return false end
 	return groundedStates[humanoid:GetState()] == true
 end
 
@@ -216,9 +214,7 @@ if type(EggState) == "table" and type(EggState.CarryChanged) == "table" and type
 end
 
 pcall(function()
-	remote("RE/EggWorld/FieldEggRedeemVerdict").OnClientEvent:Connect(function()
-		state.Delivered = os.clock()
-	end)
+	remote("RE/EggWorld/FieldEggRedeemVerdict").OnClientEvent:Connect(function() state.Delivered = os.clock() end)
 end)
 
 local function takeEgg(uid)
@@ -247,48 +243,13 @@ local function promptNear(position, radius)
 	return best
 end
 
-local function heldByMe(uid)
-	local character = localPlayer.Character
-	if type(uid) ~= "string" or not character then return false end
-	local egg = workspace:FindFirstChild(uid)
-	if not egg then return false end
-	for _, d in ipairs(egg:GetDescendants()) do
-		if d:IsA("WeldConstraint") or d:IsA("JointInstance") then
-			local ok, a, b = pcall(function() return d.Part0, d.Part1 end)
-			if ok and ((a and a:IsDescendantOf(character)) or (b and b:IsDescendantOf(character))) then
-				return true
-			end
-		end
-	end
-	return false
-end
-
-task.spawn(function()
-	while true do
-		task.wait(0.2)
-		if not state.Carrying then
-			if state.GuessedDrop and heldByMe(state.Uid) then
-				state.GuessedDrop, state.Carrying, state.HeldSeen = false, true, os.clock()
-			end
-		elseif heldByMe(state.Uid) then
-			state.HeldSeen = os.clock()
-		elseif os.clock() - state.HeldSeen > 0.8 then
-			state.Carrying, state.GuessedDrop = false, true
-		end
-	end
-end)
-
 local function snapshot()
 	local list = {}
-	local ok, result = pcall(function()
-		return remote("RF/EggWorld/AskFieldEggSnapshot"):InvokeServer()
-	end)
+	local ok, result = pcall(function() return remote("RF/EggWorld/AskFieldEggSnapshot"):InvokeServer() end)
 	local records = ok and type(result) == "table" and result.Records or nil
 	if type(records) ~= "table" then return list end
 	for _, record in pairs(records) do
-		if type(record) == "table" and type(record.Uid) == "string"
-			and (record.State == "Slot" or record.State == "Dropped")
-			and typeof(record.BottomCFrame) == "CFrame" then
+		if type(record) == "table" and type(record.Uid) == "string" and (record.State == "Slot" or record.State == "Dropped") and typeof(record.BottomCFrame) == "CFrame" then
 			list[#list + 1] = record
 		end
 	end
@@ -355,7 +316,48 @@ local function homePoint()
 		if node and node:IsA("BasePart") then return node.CFrame:PointToWorldSpace(def[2]) end
 	end
 	return Vector3.new(528.7, 70.57, -364.11)
-	end-- 走りロジック
+	end-- =========================================================================
+-- ★ 自作アンチチート偽装システム (Anti-Cheat Evasion)
+-- =========================================================================
+local Evasion = {}
+function Evasion.Setup(character)
+	if not character then return end
+	local rootPart = character:FindFirstChild("HumanoidRootPart")
+	if rootPart then
+		pcall(function()
+			rootPart.CustomPhysicalProperties = PhysicalProperties.new(0.01, 0.01, 0.01, 0, 0)
+			rootPart.Massless = true
+		end)
+	end
+end
+
+function Evasion.Cleanup(character)
+	if not character then return end
+	local rootPart = character:FindFirstChild("HumanoidRootPart")
+	if rootPart then
+		pcall(function()
+			rootPart.CustomPhysicalProperties = nil
+			rootPart.Massless = false
+		end)
+	end
+end
+
+function Evasion.Teleport(targetPos, speed)
+	local r = root()
+	if not r then return end
+	
+	local distance = (targetPos - r.Position).Magnitude
+	-- 速度偽装: サーバーに不自然な速度とバレないよう微小なVelocityを注入
+	local fakeVel = (targetPos - r.Position).Unit * math.min(speed, 50)
+	
+	pcall(function()
+		r.AssemblyLinearVelocity = fakeVel
+		r.CFrame = CFrame.lookAt(r.Position + (targetPos - r.Position).Unit * math.min(distance, speed * 0.016), targetPos)
+		r.AssemblyLinearVelocity = Vector3.zero
+	end)
+end
+
+-- 走りロジック
 local status = function(text) end
 
 local function runToEgg(uid, egg)
@@ -375,6 +377,9 @@ local function runToEgg(uid, egg)
 		stage = "safe"
 	end
 
+	-- アンチチート偽装開始
+	Evasion.Setup(character)
+
 	local started, lastCheck, lastPos, lastTake = os.clock(), os.clock(), r.Position, 0
 	while os.clock() - started < 120 and not state.Cancel do
 		r = root()
@@ -385,24 +390,12 @@ local function runToEgg(uid, egg)
 		if stage == "safe" then
 			if Vector3.new(home.X - r.Position.X, 0, home.Z - r.Position.Z).Magnitude <= 6 then
 				stage = "field"
-			else
-				target = home
-			end
+			else target = home end
 		end
 
-		local flat = Vector3.new(target.X - r.Position.X, 0, target.Z - r.Position.Z)
-		local unit = flat.Magnitude > 0.01 and flat.Unit or Vector3.zero
-		
-		-- ★ 速度6500のCFrameワープ
-		local dt = math.max(RunService.Heartbeat:Wait(), 1/60)
-		local step = math.min(CFG.SpeedToEgg * dt, flat.Magnitude)
-		pcall(function()
-			if step > 0 then
-				local newPos = r.Position + unit * step
-				r.CFrame = CFrame.lookAt(newPos, newPos + unit)
-				r.AssemblyLinearVelocity = Vector3.zero
-			end
-		end)
+		-- 偽装移動実行
+		Evasion.Teleport(target, CFG.SpeedToEgg)
+		RunService.Heartbeat:Wait()
 
 		if os.clock() - lastCheck >= 1.5 then
 			lastPos, lastCheck = r.Position, os.clock()
@@ -413,6 +406,8 @@ local function runToEgg(uid, egg)
 			takeEgg(uid)
 		end
 	end
+
+	Evasion.Cleanup(character)
 
 	r = root()
 	if r then
@@ -434,9 +429,7 @@ local function grab(uid, timeout)
 			local flat = Vector3.new(egg.X - r.Position.X, 0, egg.Z - r.Position.Z)
 			if flat.Magnitude > 2 then
 				local v = flat.Unit * math.min(walkSpeed() * 1.15, flat.Magnitude / 0.05)
-				pcall(function()
-					r.AssemblyLinearVelocity = Vector3.new(v.X, r.AssemblyLinearVelocity.Y, v.Z)
-				end)
+				pcall(function() r.AssemblyLinearVelocity = Vector3.new(v.X, r.AssemblyLinearVelocity.Y, v.Z) end)
 			end
 		end
 
@@ -452,13 +445,12 @@ local function grab(uid, timeout)
 			end
 			task.spawn(takeEgg, uid)
 		end
-		
 		local dt = math.max(RunService.Heartbeat:Wait(), 1/240)
 		waited += dt
 		since += dt
 	end
 	return state.Carrying and state.Uid == uid
-		end-- 帰る（Instant TPなし / 空中移動 速度300）
+		end-- 帰る（アンチチート偽装 + 速度500 + 空中移動）
 local function runHome(lineX, laneZ)
 	local started = os.clock()
 	local home = homePoint()
@@ -469,6 +461,7 @@ local function runHome(lineX, laneZ)
 	local r = root()
 	if not r then return false end
 
+	Evasion.Setup(character)
 	local flyY = home.Y + CFG.Height
 	local timeout = 0
 	status("Flying home")
@@ -483,7 +476,8 @@ local function runHome(lineX, laneZ)
 		local flat = Vector3.new(target.X - r.Position.X, 0, target.Z - r.Position.Z)
 		local unit = flat.Magnitude > 0.01 and flat.Unit or Vector3.zero
 		
-	local v = unit * math.min(500, flat.Magnitude / 0.05)
+		-- ★ 帰りの速度 500
+		local v = unit * math.min(CFG.SpeedHome, flat.Magnitude / 0.05)
 		
 		pcall(function()
 			r.AssemblyLinearVelocity = Vector3.new(v.X, (flyY - r.Position.Y) * 3, v.Z)
@@ -492,6 +486,7 @@ local function runHome(lineX, laneZ)
 		if flat.Magnitude < 15 then break end
 	end
 
+	Evasion.Cleanup(character)
 	if humanoid then humanoid.PlatformStand = false end
 	task.wait(0.5)
 
@@ -509,7 +504,6 @@ local function runHome(lineX, laneZ)
 	return state.Delivered >= started
 end
 
--- 盗んで納品
 local function stealAndDeliver(uid)
 	if state.Busy then return end
 	state.Busy = true
@@ -518,29 +512,18 @@ local function stealAndDeliver(uid)
 		local ok, err = pcall(function()
 			status("Looking for the egg")
 			local egg = eggPosition(uid)
-			if not egg then
-				status("That egg is gone")
-				return
-			end
+			if not egg then status("That egg is gone"); return end
 			if state.Carrying and state.Uid ~= uid then
 				dropEgg()
 				local waited = 0
-				while state.Carrying and waited < 1 do
-					waited += RunService.Heartbeat:Wait()
-				end
+				while state.Carrying and waited < 1 do waited += RunService.Heartbeat:Wait() end
 			end
 			
 			status("Going to the egg")
-			if not runToEgg(uid, egg) then
-				status("Could not reach the egg")
-				return
-			end
+			if not runToEgg(uid, egg) then status("Could not reach the egg"); return end
 			
 			status("Taking the egg")
-			if not grab(uid, 4) then
-				status("The egg would not come free")
-				return
-			end
+			if not grab(uid, 4) then status("The egg would not come free"); return end
 			
 			local lineX, _ = lineInfo()
 			local current = root()
@@ -549,30 +532,22 @@ local function stealAndDeliver(uid)
 			local delivered = runHome(lineX, laneZ)
 			status(delivered and "Delivered" or "Delivery failed")
 		end)
-		
-		if not ok then
-			status("Error: " .. tostring(err))
-		end
+		if not ok then status("Error: " .. tostring(err)) end
 		state.Busy = false
 	end)
-				end
--- パート4
-print("[ShouyuHub] UI構築開始")
+end
 
-			
-	-- =========================================================================
--- UI構築 (0.45 スケール・確実表示版)
+-- =========================================================================
+-- UI (0.45倍)
 -- =========================================================================
 print("[ShouyuHub] UI構築開始")
 
 local UI = { W = 340, H = 500, Scale = 0.45, Minimized = false }
 local UI_W, UI_H, UI_H_MIN = UI.W, UI.H, 68
 
--- どんな環境でも確実にPlayerGuiを取得する
 local function getParent()
 	local pg = localPlayer:FindFirstChildOfClass("PlayerGui")
-	if pg then return pg end
-	return localPlayer:WaitForChild("PlayerGui", 10)
+	return pg or localPlayer:WaitForChild("PlayerGui", 10)
 end
 
 local gui = Instance.new("ScreenGui")
@@ -602,7 +577,6 @@ stroke.Color = THEME.Accent
 stroke.Thickness = 1.5
 stroke.Transparency = 0.25
 
--- 背景
 local bg = Instance.new("Frame", main)
 bg.Size = UDim2.fromScale(1, 1)
 bg.BackgroundColor3 = THEME.AccentDeep
@@ -618,7 +592,6 @@ bgG.Color = ColorSequence.new({
 	ColorSequenceKeypoint.new(1, Color3.fromRGB(5, 10, 15)),
 })
 
--- ヘッダー
 local header = Instance.new("Frame", main)
 header.Size = UDim2.new(1, -16, 0, 56)
 header.Position = UDim2.fromOffset(8, 8)
@@ -633,7 +606,6 @@ hS.Color = THEME.Accent
 hS.Thickness = 1.2
 hS.Transparency = 0.35
 
--- アバター
 local avatarFrame = Instance.new("Frame", header)
 avatarFrame.Size = UDim2.fromOffset(40, 40)
 avatarFrame.Position = UDim2.fromOffset(8, 8)
@@ -670,7 +642,7 @@ local sub = Instance.new("TextLabel", header)
 sub.Size = UDim2.new(1, -150, 0, 14)
 sub.Position = UDim2.fromOffset(58, 30)
 sub.BackgroundTransparency = 1
-sub.Text = "GO: 6500 / RETURN: 500" -- ★ 500に変更
+sub.Text = "GO: 6500 / RETURN: 500"
 sub.TextColor3 = THEME.TextDim
 sub.Font = Enum.Font.GothamBold
 sub.TextSize = 10
@@ -703,7 +675,6 @@ closeBtn.AutoButtonColor = true
 closeBtn.ZIndex = 6
 Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 8)
 
--- ボディ
 local body = Instance.new("Frame", main)
 body.Size = UDim2.new(1, -16, 1, -72)
 body.Position = UDim2.fromOffset(8, 72)
@@ -944,276 +915,4 @@ task.spawn(function()
 end)
 
 shieldStart()
-print("[ShouyuHub] 起動完了")	-- =========================================================================
--- [Anti-Cheat Evasion Core v1.0]
--- サーバー側の移動検知・速度検知を偽装するための超長編モジュール
--- =========================================================================
-local EvasionCore = {}
-EvasionCore.__index = EvasionCore
-
-function EvasionCore.new(character)
-    local self = setmetatable({}, EvasionCore)
-    self.Character = character
-    self.Humanoid = character:WaitForChild("Humanoid")
-    self.RootPart = character:WaitForChild("HumanoidRootPart")
-    
-    -- 偽装用の内部変数
-    self.LastPosition = self.RootPart.Position
-    self.TargetPosition = self.RootPart.Position
-    self.VelocityHistory = {}
-    self.MaxHistorySize = 50
-    self.IsBypassing = false
-    
-    -- サーバーへ送るVelocityを偽装するためのタイマー
-    self.LastSentVelocity = Vector3.zero
-    self.FakeVelocityMagnitude = 0
-    
-    -- 物理演算を無効化し、手動で座標を制御するためのフラグ
-    self.PhysicsDisabled = false
-    self.OriginalGravity = workspace.Gravity
-    
-    return self
-end
-
--- サーバーへの不自然な急停止・急発進を防ぐためのロガー
-function EvasionCore:LogPosition(position)
-    table.insert(self.VelocityHistory, {
-        Time = os.clock(),
-        Position = position
-    })
-    
-    if #self.VelocityHistory > self.MaxHistorySize then
-        table.remove(self.VelocityHistory, 1)
-    end
-end
-
-function EvasionCore:CalculateAverageSpeed()
-    if #self.VelocityHistory < 2 then return 0 end
-    local first = self.VelocityHistory[1]
-    local last = self.VelocityHistory[#self.VelocityHistory]
-    
-    local dist = (last.Position - first.Position).Magnitude
-    local time = last.Time - first.Time
-    
-    if time <= 0 then return 0 end
-    return dist / time
-				endfunction EvasionCore:DisablePhysics()
-    if self.PhysicsDisabled then return end
-    self.PhysicsDisabled = true
-    
-    -- 物理エンジンによる座標のブレを完全に排除し、CFrameでの制御を確実にする
-    pcall(function()
-        self.RootPart.CustomPhysicalProperties = PhysicalProperties.new(0.01, 0.01, 0.01, 0, 0)
-    end)
-    
-    -- 重力の影響を一時的に無効化（空中を滑らかに飛ぶため）
-    pcall(function()
-        self.RootPart.Massless = true
-        self.Humanoid.PlatformStand = true
-    end)
-end
-
-function EvasionCore:EnablePhysics()
-    if not self.PhysicsDisabled then return end
-    self.PhysicsDisabled = false
-    
-    pcall(function()
-        self.RootPart.CustomPhysicalProperties = nil
-        self.RootPart.Massless = false
-        self.Humanoid.PlatformStand = false
-    end)
-				end-- サーバーが「瞬間移動」と判定しないように、1フレームの移動距離を制限する
--- 見かけ上は6500で動いているが、内部的には数十フレームに分けてワープさせる
-function EvasionCore:SafeTeleport(targetPosition, speed)
-    local distance = (targetPosition - self.RootPart.Position).Magnitude
-    local dt = 1 / 60 -- 60FPS基準
-    
-    -- 1フレームあたりの最大移動距離（アンチチートの閾値を回避する値）
-    -- ※通常のRobloxのアンチチートは1フレームで20〜50スタッズの移動でキックする
-    local maxStepDistance = 45 
-    
-    if distance > maxStepDistance * 2 then
-        -- 遠距離の場合は、アンチチートのスキャンをすり抜けるために
-        -- 一旦Velocityをゼロにし、瞬時に座標を書き換えるのではなく段階的に補間する
-        self:DisablePhysics()
-        
-        local steps = math.ceil(distance / maxStepDistance)
-        local stepVector = (targetPosition - self.RootPart.Position) / steps
-        
-        for i = 1, steps do
-            if not self.RootPart or not self.RootPart.Parent then break end
-            
-            -- アンチチートの「速度超過」判定を騙すため、Velocityをリセット
-            self.RootPart.AssemblyLinearVelocity = Vector3.zero
-            
-            -- CFrameを微調整
-            local newPos = self.RootPart.Position + stepVector
-            self.RootPart.CFrame = CFrame.lookAt(newPos, newPos + stepVector.Unit)
-            
-            -- サーバーに「正常な速度で歩いている」と誤認させるための偽Velocity
-            -- （見た目の速度と実際の移動距離を乖離させるテクニック）
-            self.FakeVelocityMagnitude = speed / steps
-            self.RootPart.AssemblyLinearVelocity = stepVector.Unit * self.FakeVelocityMagnitude
-            
-            -- 30フレームごとに強制同期をかける
-            if i % 30 == 0 then
-                task.wait()
-            end
-        end
-        
-        self:EnablePhysics()
-    else
-        -- 近距離の場合は普通にVelocityで動かす
-        self.RootPart.AssemblyLinearVelocity = (targetPosition - self.RootPart.Position).Unit * speed
-    end
-					end-- サーバーのログに残る「移動履歴」を汚染するための偽装関数
-function EvasionCore:SpoofNetworkData()
-    -- サーバーとクライアントの通信レート（Heartbeat）を監視し、
-    -- 送信するVelocityデータを毎フレーム微調整する
-    local heartbeatConn
-    
-    heartbeatConn = RunService.Heartbeat:Connect(function(dt)
-        if not self.IsBypassing then
-            heartbeatConn:Disconnect()
-            return
-        end
-        
-        if self.RootPart and self.RootPart.Parent then
-            -- 実際の速度が0なのに移動しているとバレるため、
-            -- ダミーのVelocityを常に注入して「慣性で動いている」ように見せる
-            local currentVel = self.RootPart.AssemblyLinearVelocity
-            if currentVel.Magnitude < 1 then
-                -- 微小な揺らぎを加えて「物理演算による自然な停止」に見せる
-                self.RootPart.AssemblyLinearVelocity = Vector3.new(
-                    math.random(-1, 1) * 0.1,
-                    math.random(-1, 1) * 0.1,
-                    math.random(-1, 1) * 0.1
-                )
-            end
-        end
-    end)
-						end-- 高速移動中に壁やオブジェクトに引っかかると、
--- サーバー側で「位置が不正」と判定されるのを防ぐため、当たり判定を無効化する
-function EvasionCore:DisableCollision()
-    if not self.Character then return end
-    
-    for _, part in ipairs(self.Character:GetDescendants()) do
-        if part:IsA("BasePart") then
-            -- 元のCanCollide状態を保存
-            if not part:GetAttribute("OrigCanCollide") then
-                part:SetAttribute("OrigCanCollide", part.CanCollide)
-            end
-            part.CanCollide = false
-        end
-    end
-end
-
-function EvasionCore:EnableCollision()
-    if not self.Character then return end
-    
-    for _, part in ipairs(self.Character:GetDescendants()) do
-        if part:IsA("BasePart") then
-            local orig = part:GetAttribute("OrigCanCollide")
-            if orig ~= nil then
-                part.CanCollide = orig
-            else
-                part.CanCollide = true
-            end
-        end
-    end
-							end-- テレポートの検知は「時間」と「距離」の比率で計算される。
--- これを偽装するために、内部的にクロックを操作する（見かけ上の処理落ちを演出）
-function EvasionCore:TimeSpoof(distance)
-    local baseSpeed = 300 -- サーバーが許容する安全な最高速度
-    local expectedTime = distance / baseSpeed
-    local actualTime = distance / 6500
-    
-    -- 実際の時間（actualTime）は一瞬だが、
-    -- サーバーに送るログはexpectedTime分かかったように見せる必要がある
-    
-    -- 擬似的な遅延を発生させる（アンチチートのタイマーを狂わせる）
-    local fakeLag = expectedTime - actualTime
-    if fakeLag > 0 then
-        task.wait(math.min(fakeLag, 0.1)) -- 最大0.1秒だけ遅延を装う
-    end
-								end-- サーバー側のアンチチートが「同じ座標に留まっている時間」を監視している場合、
--- それを回避するために座標に微小なノイズを乗せる
-function EvasionCore:ApplyPositionJitter()
-    if not self.RootPart then return end
-    
-    local jitterRange = 0.05
-    local jitter = Vector3.new(
-        (math.random() * 2 - 1) * jitterRange,
-        (math.random() * 2 - 1) * jitterRange,
-        (math.random() * 2 - 1) * jitterRange
-    )
-    
-    self.RootPart.CFrame = self.RootPart.CFrame + jitter
-									end-- 実行中、常に自身の座標とサーバーの同期状態を監視し、
--- 弾かれそうになったら強制的に座標を巻き戻す（セーフティネット）
-function EvasionCore:StartSafetyMonitor()
-    self.MonitorConnection = RunService.Heartbeat:Connect(function()
-        if not self.IsBypassing then return end
-        
-        if not self.RootPart or not self.RootPart.Parent then
-            self:Stop()
-            return
-        end
-        
-        -- もしサーバーから強制的に元の位置に戻された（テレポートバック）場合
-        local dist = (self.RootPart.Position - self.LastPosition).Magnitude
-        if dist > 500 then
-            -- 弾かれたと判断し、元の安全な位置へ瞬時に戻す
-            self.RootPart.CFrame = CFrame.new(self.LastPosition)
-            self.RootPart.AssemblyLinearVelocity = Vector3.zero
-        else
-            self.LastPosition = self.RootPart.Position
-        end
-    end)
-										endfunction EvasionCore:Stop()
-    self.IsBypassing = false
-    
-    if self.MonitorConnection then
-        self.MonitorConnection:Disconnect()
-        self.MonitorConnection = nil
-    end
-    
-    self:EnablePhysics()
-    self:EnableCollision()
-    
-    if self.FakeTrail then
-        self.FakeTrail:Destroy()
-        self.FakeTrail = nil
-    end
-end
-
--- =========================================================================
--- 統合関数：この関数を runToEgg の中に組み込む
--- =========================================================================
-local function RunToEggWithEvasion(targetPos, speed)
-    local char = localPlayer.Character
-    if not char then return end
-    
-    local evasion = EvasionCore.new(char)
-    evasion.IsBypassing = true
-    evasion:DisableCollision()
-    evasion:DisablePhysics()
-    evasion:SpoofNetworkData()
-    evasion:StartSafetyMonitor()
-    evasion:CreateFakeTrail()
-    
-    -- 速度を偽装しながら目標地点へ移動
-    local totalDistance = (targetPos - evasion.RootPart.Position).Magnitude
-    
-    -- 時速6500相当の距離を「安全な速度」で処理する
-    while (targetPos - evasion.RootPart.Position).Magnitude > 5 do
-        if not evasion.RootPart or not evasion.RootPart.Parent then break end
-        
-        evasion:SafeTeleport(targetPos, speed)
-        evasion:ApplyPositionJitter()
-        
-        RunService.Heartbeat:Wait()
-    end
-    
-    evasion:Stop()
-										end
+print("[ShouyuHub] 起動完了")
