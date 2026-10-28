@@ -475,9 +475,10 @@ local function promptNear(position, radius)
 end
 
 print("[ShouyuHub] Part 5/8 ready")-- ============================================================
--- Part 6/8: Movement (Ground Run & Sky Glide)
 -- ============================================================
-local Fly = { Active = false, Target = nil, Character = nil, Arrived = false }
+-- Part 6: 移動ロジック (ChilliHub完全再現版)
+-- ============================================================
+local Fly = { Active = false, Target = nil, Character = nil, Arrived = false, Camera = nil, OldCamType = nil }
 
 local function flyStop()
 	Fly.Active = false
@@ -489,9 +490,13 @@ local function flyStop()
 	end) end
 	local h = hum()
 	if h then pcall(function() h.PlatformStand = false end) end
+	if Fly.Camera then
+		pcall(function() Fly.Camera.CameraType = Fly.OldCamType end)
+		Fly.Camera = nil
+	end
 end
 
--- 行き：物理移動
+-- 行き用（地上を走る）
 local function flyToGround(targetPos, speed, checkFn, timeout)
 	speed = speed or CFG.SpeedToEgg
 	timeout = timeout or 60
@@ -522,17 +527,6 @@ local function flyToGround(targetPos, speed, checkFn, timeout)
 		local rp = root()
 		if not rp or rp.Parent ~= c then break end
 		h = hum()
-
-		if isRagdolled() then
-			if h then h:Move(Vector3.zero, false) end
-			rp.AssemblyLinearVelocity = Vector3.zero
-			while isRagdolled() and os.clock() - started < timeout and not state.Cancel do RunService.Heartbeat:Wait() end
-			if state.Cancel or os.clock() - started > timeout then break end
-			rp = root()
-			if not rp then break end
-			task.wait(0.1)
-			dt = 1/60
-		end
 
 		local posFlat = Vector3.new(rp.Position.X, 0, rp.Position.Z)
 		local diff = targetFlat - posFlat
@@ -567,8 +561,8 @@ local function flyToGround(targetPos, speed, checkFn, timeout)
 	return Fly.Arrived
 end
 
--- 帰り：強制滑空（卵を持っていても動ける）
-local function flyToSky(targetPos, speed, checkFn, timeout)
+-- 帰り用（ChilliHubの上空滑空＋強制同期）
+local function flyToChilli(targetPos, speed, checkFn, timeout)
 	speed = speed or CFG.SpeedHome
 	timeout = timeout or 60
 	if Fly.Active then flyStop() end
@@ -578,8 +572,19 @@ local function flyToSky(targetPos, speed, checkFn, timeout)
 	if not r or not c then return false end
 
 	local h = hum()
-	-- 歩行を完全に無効化して浮かせる
-	if h then pcall(function() h.PlatformStand = true end) end
+	if h then 
+		pcall(function() 
+			h.PlatformStand = true 
+			h:ChangeState(Enum.HumanoidStateType.Freefall)
+		end) 
+	end
+	
+	-- カメラを固定してフリーズを防ぐ
+	if workspace.CurrentCamera and not Fly.Camera then
+		Fly.Camera = workspace.CurrentCamera
+		Fly.OldCamType = Fly.Camera.CameraType
+		pcall(function() Fly.Camera.CameraType = Enum.CameraType.Scriptable end)
+	end
 
 	Fly.Active = true
 	Fly.Target = targetPos
@@ -587,6 +592,7 @@ local function flyToSky(targetPos, speed, checkFn, timeout)
 	Fly.Arrived = false
 	local started = os.clock()
 	local trackedPos = r.Position
+	local lastHeartbeat = os.clock()
 
 	local conn2 = RunService.PreSimulation:Connect(function(dt)
 		if not Fly.Active or Fly.Arrived then return end
@@ -607,6 +613,9 @@ local function flyToSky(targetPos, speed, checkFn, timeout)
 		local rp = root()
 		if not rp or rp.Parent ~= c then Fly.Active = false; return end
 
+		local now = os.clock()
+		lastHeartbeat = now
+		
 		local diff = Fly.Target - trackedPos
 		local step = speed * math.max(dt, 1/240)
 		
@@ -643,19 +652,16 @@ local function flyToSky(targetPos, speed, checkFn, timeout)
 	return ok
 end
 
-print("[ShouyuHub] Part 6/8 ready")-- ============================================================
--- Part 7/8: Actions
+-- ============================================================
+-- Part 7: アクション (確実に掴む & ChilliHub帰還)
 -- ============================================================
 local function grabEggAt(uid, eggPos)
 	status("掴み中")
-	
-	-- ★ 確実に掴むため、一瞬だけ卵の真上に吸い寄せる
-	local rp = root()
-	if rp and eggPos then
+	local r = root()
+	if r and eggPos then
 		pcall(function()
-			rp.CFrame = CFrame.new(eggPos + Vector3.new(0, 3, 0))
-			rp.AssemblyLinearVelocity = Vector3.zero
-			rp.AssemblyAngularVelocity = Vector3.zero
+			r.CFrame = CFrame.new(eggPos + Vector3.new(0, 3, 0))
+			r.AssemblyLinearVelocity = Vector3.zero
 		end)
 		task.wait(0.1)
 	end
@@ -668,12 +674,12 @@ local function grabEggAt(uid, eggPos)
 	task.spawn(takeEgg, uid)
 
 	local waited = 0
-	while not (state.Carrying and state.Uid == uid) and waited < CFG.GrabRetrySec and not state.Cancel do
+	while not (state.Carrying and state.Uid == uid) and waited < 2 and not state.Cancel do
 		if math.floor(waited * 10) % 2 == 0 then
 			local eggNow = eggPosition(uid, true)
 			if not eggNow then break end
-			local rp2 = root()
-			if rp2 then
+			local r2 = root()
+			if r2 then
 				local p = promptNear(eggNow, CFG.GrabRadius)
 				if p and typeof(fireproximityprompt) == "function" then
 					pcall(function() p.HoldDuration = 0; fireproximityprompt(p) end)
@@ -687,42 +693,42 @@ local function grabEggAt(uid, eggPos)
 end
 
 local function runToEgg(uid, egg)
+	status("卵へ移動中")
 	local started = os.clock()
 	if fieldLocked() then
-		status(isNight() and "夜: 待機" or "壁UP: 待機")
 		while fieldLocked() and not state.Cancel do RunService.Heartbeat:Wait() end
 	end
+	local ok = flyToGround(egg, CFG.SpeedToEgg, function()
+		return os.clock() - started > CFG.StealTimeLimit
+	end, CFG.StealTimeLimit)
 
-	for attempt = 1, CFG.MaxRetries do
-		if state.Cancel then return false end
-		local eggNow = eggPosition(uid, true)
-		if not eggNow then return false end
-
-		status("卵へ移動中" .. (attempt > 1 and (" (" .. attempt .. ")") or ""))
-		local ok = flyToGround(eggNow, CFG.SpeedToEgg, function()
-			return state.Cancel or os.clock() - started > CFG.StealTimeLimit
-		end, CFG.StealTimeLimit)
-
-		if ok then return grabEggAt(uid, eggNow) end
-
-		if isRagdolled() then waitRagdollEnd() end
-		if attempt < CFG.MaxRetries and not state.Cancel then task.wait(1) end
-	end
+	if ok then return grabEggAt(uid, egg) end
 	return false
 end
 
--- ★ 帰還（強制滑空・速度1000）
 local function runHome(deliveryStartAt)
 	local r = root()
 	if not r then return false end
 	local home = homePoint()
+	local maxY = math.max(r.Position.Y, home.Y) + 70
 
 	local function carryStop()
 		return state.Delivered >= deliveryStartAt or state.Cancel or not state.Carrying
 	end
 
-	status("帰還中")
-	flyToSky(home, CFG.SpeedHome, carryStop, CFG.HomeTimeLimit)
+	-- ChilliHubの3点移動（上空へ上がる）
+	status("帰還: 上昇")
+	flyToChilli(Vector3.new(r.Position.X, maxY, r.Position.Z), CFG.SpeedHome, carryStop, CFG.HomeTimeLimit)
+	
+	if not carryStop() then
+		status("帰還: 横移動")
+		flyToChilli(Vector3.new(home.X, maxY, home.Z), CFG.SpeedHome, carryStop, CFG.HomeTimeLimit)
+	end
+	
+	if not carryStop() then
+		status("帰還: 降下")
+		flyToChilli(home, CFG.SpeedHome, carryStop, CFG.HomeTimeLimit)
+	end
 
 	status("納品中")
 	local settle = 0
@@ -742,87 +748,6 @@ local function runHome(deliveryStartAt)
 	end
 	return state.Delivered >= deliveryStartAt
 end
-
-local function stealAndDeliver(uid, retry)
-	if state.Busy then return false end
-	state.Busy = true
-	state.Cancel = false
-	local attempts = retry and CFG.MaxRetries or 1
-
-	for attempt = 1, attempts do
-		if state.Cancel then break end
-		local deliveryStartAt = os.clock()
-		local ok, err = pcall(function()
-			local egg = eggPosition(uid, true)
-			if not egg then return end
-			if state.Carrying and state.Uid ~= uid then
-				dropEgg()
-				local waited = 0
-				while state.Carrying and waited < 1 do waited += RunService.Heartbeat:Wait() end
-			end
-			if runToEgg(uid, egg) then
-				local delivered = runHome(deliveryStartAt)
-				status(delivered and "納品完了" or "納品失敗")
-			end
-		end)
-		if state.Delivered >= deliveryStartAt then break end
-		if attempt < attempts and not state.Cancel then task.wait(1) end
-	end
-	state.Busy = false
-	return true
-end
-
-local autoFilter = { MinRarity = 0, MinValue = 0 }
-local blocked = {}
-local autoLoop = { Active = false, Thread = nil }
-
-local function pickBest()
-	local list = snapshot(true)
-	local best, bestVal = nil, -1
-	local now = os.clock()
-	for _, record in ipairs(list) do
-		if not blocked[record.Uid] or now > blocked[record.Uid] then
-			local info = describe(record)
-			if (autoFilter.MinRarity <= 0 or info.Rarity >= autoFilter.MinRarity) and (autoFilter.MinValue <= 0 or info.Value >= autoFilter.MinValue) then
-				if info.Value > bestVal then best, bestVal = record, info.Value end
-			end
-		end
-	end
-	return best
-end
-
-local function startAutoLoop()
-	if autoLoop.Active then return end
-	autoLoop.Active = true
-	autoLoop.Thread = task.spawn(function()
-		while autoLoop.Active and gui and gui.Parent do
-			if not state.Busy then
-				if fieldLocked() then
-					status(isNight() and "夜: 待機" or "壁UP: 待機")
-					while fieldLocked() and autoLoop.Active do RunService.Heartbeat:Wait() end
-				else
-					local best = pickBest()
-					if best then
-						local ok = stealAndDeliver(best.Uid, true)
-						if not ok and not state.Cancel then blocked[best.Uid] = os.clock() + CFG.BlockedSec end
-					else
-						status("条件に合う卵なし")
-						task.wait(0.5)
-					end
-				end
-			end
-			task.wait(0.2)
-		end
-		autoLoop.Active = false
-	end)
-end
-
-local function stopAutoLoop()
-	autoLoop.Active = false
-	if autoLoop.Thread then pcall(task.cancel, autoLoop.Thread); autoLoop.Thread = nil end
-end
-
-print("[ShouyuHub] Part 7/8 ready")-- ============================================================
 -- Part 8/8: UI + Init
 -- ============================================================
 print("[ShouyuHub] UI 構築開始")
