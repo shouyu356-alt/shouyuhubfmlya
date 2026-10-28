@@ -1,6 +1,6 @@
 -- ============================================================
--- ShouyuHub | Auto Steal (Definitive Clean Build)
--- Part 1/8: Header / Config / Dependencies
+-- ShouyuHub | Auto Steal (Perfect Build)
+-- Part 1/8: Config / Dependencies
 -- ============================================================
 local Players           = game:GetService("Players")
 local RunService        = game:GetService("RunService")
@@ -13,8 +13,8 @@ local CFG = {
 	-- 移動
 	SpeedToEgg      = 3000,    -- 行きの速度
 	SpeedHome       = 1000,    -- 帰りの速度
-	ArriveDist      = 6,       -- 到着判定の水平距離
-	Decel           = 60000,   -- 行きの減速度（オーバーシュート防止）
+	ArriveDist      = 6,       -- 到着判定
+	Decel           = 50000,   -- 減速度（通り過ぎ防止）
 
 	-- 掴み
 	GrabRadius      = 12,
@@ -271,7 +271,7 @@ local function takeEgg(uid)
 	end
 end
 
--- ★ 卵を落とす（必須）
+-- ★ 卵を落とす
 local function dropEgg()
 	if type(EggState) == "table" and type(EggState.DropFieldEgg) == "function" then
 		state.SentDropAt = os.clock()
@@ -475,7 +475,7 @@ local function promptNear(position, radius)
 end
 
 print("[ShouyuHub] Part 5/8 ready")-- ============================================================
--- Part 6/8: Movement (Ground Run & Chilli Waypoint)
+-- Part 6/8: Movement (Ground Run & Sky Glide)
 -- ============================================================
 local Fly = { Active = false, Target = nil, Character = nil, Arrived = false }
 
@@ -491,7 +491,7 @@ local function flyStop()
 	if h then pcall(function() h.PlatformStand = false end) end
 end
 
--- 行き用：物理移動（速度3000）
+-- 行き：物理移動
 local function flyToGround(targetPos, speed, checkFn, timeout)
 	speed = speed or CFG.SpeedToEgg
 	timeout = timeout or 60
@@ -567,8 +567,8 @@ local function flyToGround(targetPos, speed, checkFn, timeout)
 	return Fly.Arrived
 end
 
--- 帰り用：ChilliHub方式（CFrameと速度の同期）
-local function flyToChilli(targetPos, speed, checkFn, timeout)
+-- 帰り：強制滑空（卵を持っていても動ける）
+local function flyToSky(targetPos, speed, checkFn, timeout)
 	speed = speed or CFG.SpeedHome
 	timeout = timeout or 60
 	if Fly.Active then flyStop() end
@@ -578,6 +578,7 @@ local function flyToChilli(targetPos, speed, checkFn, timeout)
 	if not r or not c then return false end
 
 	local h = hum()
+	-- 歩行を完全に無効化して浮かせる
 	if h then pcall(function() h.PlatformStand = true end) end
 
 	Fly.Active = true
@@ -648,6 +649,17 @@ print("[ShouyuHub] Part 6/8 ready")-- ==========================================
 local function grabEggAt(uid, eggPos)
 	status("掴み中")
 	
+	-- ★ 確実に掴むため、一瞬だけ卵の真上に吸い寄せる
+	local rp = root()
+	if rp and eggPos then
+		pcall(function()
+			rp.CFrame = CFrame.new(eggPos + Vector3.new(0, 3, 0))
+			rp.AssemblyLinearVelocity = Vector3.zero
+			rp.AssemblyAngularVelocity = Vector3.zero
+		end)
+		task.wait(0.1)
+	end
+
 	local prompt = promptNear(eggPos, CFG.GrabRadius)
 	if prompt and typeof(fireproximityprompt) == "function" then
 		pcall(function() prompt.HoldDuration = 0 end)
@@ -699,8 +711,7 @@ local function runToEgg(uid, egg)
 	return false
 end
 
--- ★ 帰還（ChilliHub方式 / 3点ウェイポイント）
--- ★ 帰還（純粋な物理移動・速度1000）
+-- ★ 帰還（強制滑空・速度1000）
 local function runHome(deliveryStartAt)
 	local r = root()
 	if not r then return false end
@@ -711,10 +722,8 @@ local function runHome(deliveryStartAt)
 	end
 
 	status("帰還中")
-	-- 行きと同じ物理移動（flyToGround）を使って家へ帰る
-	flyToGround(home, CFG.SpeedHome, carryStop, CFG.HomeTimeLimit)
+	flyToSky(home, CFG.SpeedHome, carryStop, CFG.HomeTimeLimit)
 
-	-- 着地と納品
 	status("納品中")
 	local settle = 0
 	while settle < 2 and state.Carrying and state.Delivered < deliveryStartAt and not state.Cancel do
@@ -725,9 +734,7 @@ local function runHome(deliveryStartAt)
 		local h = hum()
 		if h then pcall(function() h.PlatformStand = false; h:Move(Vector3.zero, false) end) end
 		task.wait(0.2)
-		-- 卵を落とす（必須）
 		dropEgg()
-		
 		local waited = 0
 		while state.Delivered < deliveryStartAt and waited < 1.5 do
 			waited += RunService.Heartbeat:Wait()
@@ -735,6 +742,7 @@ local function runHome(deliveryStartAt)
 	end
 	return state.Delivered >= deliveryStartAt
 end
+
 local function stealAndDeliver(uid, retry)
 	if state.Busy then return false end
 	state.Busy = true
