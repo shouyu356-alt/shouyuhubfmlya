@@ -559,13 +559,20 @@ local function stealAndDeliver(uid)
 -- パート4
 print("[ShouyuHub] UI構築開始")
 
--- ★ サイズを0.45に変更
+			
+	-- =========================================================================
+-- UI構築 (0.45 スケール・確実表示版)
+-- =========================================================================
+print("[ShouyuHub] UI構築開始")
+
 local UI = { W = 340, H = 500, Scale = 0.45, Minimized = false }
 local UI_W, UI_H, UI_H_MIN = UI.W, UI.H, 68
 
+-- どんな環境でも確実にPlayerGuiを取得する
 local function getParent()
 	local pg = localPlayer:FindFirstChildOfClass("PlayerGui")
-	return pg or localPlayer:WaitForChild("PlayerGui")
+	if pg then return pg end
+	return localPlayer:WaitForChild("PlayerGui", 10)
 end
 
 local gui = Instance.new("ScreenGui")
@@ -663,7 +670,7 @@ local sub = Instance.new("TextLabel", header)
 sub.Size = UDim2.new(1, -150, 0, 14)
 sub.Position = UDim2.fromOffset(58, 30)
 sub.BackgroundTransparency = 1
-sub.Text = "GO: 6500 / RETURN: 300"
+sub.Text = "GO: 6500 / RETURN: 500" -- ★ 500に変更
 sub.TextColor3 = THEME.TextDim
 sub.Font = Enum.Font.GothamBold
 sub.TextSize = 10
@@ -937,8 +944,7 @@ task.spawn(function()
 end)
 
 shieldStart()
-print("[ShouyuHub] 起動完了")
-				-- =========================================================================
+print("[ShouyuHub] 起動完了")	-- =========================================================================
 -- [Anti-Cheat Evasion Core v1.0]
 -- サーバー側の移動検知・速度検知を偽装するための超長編モジュール
 -- =========================================================================
