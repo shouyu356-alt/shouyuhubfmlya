@@ -475,7 +475,8 @@ local function promptNear(position, radius)
 end
 
 print("[ShouyuHub] Part 5/8 ready")-- ============================================================
--- Part 6/8: Movement (Pure Physics Only)
+-- ============================================================
+-- Part 6/8: Movement (Ground Run & Chilli Waypoint)
 -- ============================================================
 local Fly = { Active = false, Target = nil, Character = nil, Arrived = false }
 
@@ -484,21 +485,25 @@ local function flyStop()
 	Fly.Target, Fly.Character, Fly.Arrived = nil, nil, false
 	local r = root()
 	if r then pcall(function()
-		r.AssemblyLinearVelocity = Vector3.new(0, r.AssemblyLinearVelocity.Y, 0)
+		r.AssemblyLinearVelocity = Vector3.zero
+		r.AssemblyAngularVelocity = Vector3.zero
 	end) end
 	local h = hum()
-	if h then pcall(function() h:Move(Vector3.zero, false) end) end
+	if h then pcall(function() h.PlatformStand = false end) end
 end
 
--- 汎用物理移動（行きも帰りもこれを使う）
+-- 行き用：物理移動（速度3000）
 local function flyToGround(targetPos, speed, checkFn, timeout)
-	speed = speed or 3000
+	speed = speed or CFG.SpeedToEgg
 	timeout = timeout or 60
 	if Fly.Active then flyStop() end
 
 	local c = localPlayer.Character
 	local r = root()
 	if not r or not c then return false end
+
+	local h = hum()
+	if h then pcall(function() h.PlatformStand = false end) end
 
 	Fly.Active = true
 	Fly.Target = targetPos
@@ -508,7 +513,6 @@ local function flyToGround(targetPos, speed, checkFn, timeout)
 	local targetFlat = Vector3.new(targetPos.X, 0, targetPos.Z)
 	local lastPos = r.Position
 	local stuckTimer = 0
-	local h = hum()
 
 	while Fly.Active do
 		local dt = RunService.Heartbeat:Wait()
@@ -551,8 +555,6 @@ local function flyToGround(targetPos, speed, checkFn, timeout)
 
 		local moveDist = diff.Magnitude
 		local unit = diff.Unit
-		
-		-- 速度制限と減速計算
 		local desiredSpeed = math.min(speed, math.sqrt(2 * CFG.Decel * moveDist))
 		local v = unit * desiredSpeed
 
@@ -566,7 +568,85 @@ local function flyToGround(targetPos, speed, checkFn, timeout)
 	return Fly.Arrived
 end
 
-print("[ShouyuHub] Part 6/8 ready")-- ============================================================
+-- ★ 帰り用：ChilliHub方式（CFrameと速度の同期）
+local function flyToChilli(targetPos, speed, checkFn, timeout)
+	speed = speed or CFG.SpeedHome
+	timeout = timeout or 60
+	if Fly.Active then flyStop() end
+
+	local c = localPlayer.Character
+	local r = root()
+	if not r or not c then return false end
+
+	local h = hum()
+	if h then pcall(function() h.PlatformStand = true end) end
+
+	Fly.Active = true
+	Fly.Target = targetPos
+	Fly.Character = c
+	Fly.Arrived = false
+	local started = os.clock()
+	local trackedPos = r.Position
+
+	-- 速度同期（サーバーへ物理移動に見せる）
+	local conn2 = RunService.PreSimulation:Connect(function(dt)
+		if not Fly.Active or Fly.Arrived then return end
+		local rp = root()
+		if not rp or rp.Parent ~= c then return end
+		local diff = Fly.Target - trackedPos
+		local velocity = diff.Magnitude > 0.01 and diff.Unit * speed or Vector3.zero
+		velocity += Vector3.new(0, workspace.Gravity * dt * 0.5, 0)
+		pcall(function()
+			rp.AssemblyLinearVelocity = velocity
+			rp.AssemblyAngularVelocity = Vector3.zero
+		end)
+	end)
+
+	-- 位置強制（確実に目的地へ）
+	local conn1 = RunService.Heartbeat:Connect(function(dt)
+		if not Fly.Active or Fly.Arrived then return end
+		if checkFn and checkFn() then Fly.Active = false; return end
+		local rp = root()
+		if not rp or rp.Parent ~= c then Fly.Active = false; return end
+
+		local diff = Fly.Target - trackedPos
+		local step = speed * math.max(dt, 1/240)
+		
+		if diff.Magnitude <= step then
+			trackedPos = Fly.Target
+			Fly.Arrived = true
+		else
+			trackedPos = trackedPos + diff.Unit * step
+		end
+		
+		-- 引っ張り返されたら位置をリセット
+		if (rp.Position - trackedPos).Magnitude > 40 then trackedPos = rp.Position end
+
+		local look = Vector3.new(diff.X, 0, diff.Z)
+		local rot = look.Magnitude > 0.05 and CFrame.lookAt(Vector3.zero, look.Unit) or rp.CFrame.Rotation
+		
+		pcall(function()
+			rp.CFrame = CFrame.new(trackedPos) * rot
+			rp.AssemblyLinearVelocity = Vector3.zero
+			rp.AssemblyAngularVelocity = Vector3.zero
+		end)
+	end)
+
+	while Fly.Active and not Fly.Arrived do
+		if state.Cancel or os.clock() - started > timeout then break end
+		if checkFn and checkFn() then break end
+		RunService.Heartbeat:Wait()
+	end
+
+	conn1:Disconnect()
+	conn2:Disconnect()
+	
+	local ok = Fly.Arrived
+	flyStop()
+	return ok
+end
+
+print("[ShouyuHub] Part 6/8 ready")
 -- Part 7/8: Actions
 -- ============================================================
 local function grabEggAt(uid, eggPos)
@@ -639,33 +719,50 @@ local function runToEgg(uid, egg)
 	return false
 end
 
--- ★ 帰還（速度1000の物理移動 ＋ 最後にDropFieldEgg）
+-- ★ 帰還（ChilliHub方式 / 3点ウェイポイント）
 local function runHome(deliveryStartAt)
 	local r = root()
 	if not r then return false end
 	local home = homePoint()
+	local maxY = math.max(r.Position.Y, home.Y) + 70
 
 	local function carryStop()
 		return state.Delivered >= deliveryStartAt or state.Cancel or not state.Carrying
 	end
 
-	status("帰還中")
-	-- 速度1000で家まで物理移動
-	flyToGround(home, CFG.SpeedHome, carryStop, CFG.HomeTimeLimit)
+	-- ① 上昇（今の位置のまま真上へ）
+	status("帰還: 上昇")
+	flyToChilli(Vector3.new(r.Position.X, maxY, r.Position.Z), CFG.SpeedHome, carryStop, CFG.HomeTimeLimit)
 
-	-- 着地して落ち着くのを待つ
-	status("着地")
+	-- ② 水平移動（家の真上へ）
+	if not carryStop() then
+		status("帰還: 横移動")
+		flyToChilli(Vector3.new(home.X, maxY, home.Z), CFG.SpeedHome, carryStop, CFG.HomeTimeLimit)
+	end
+
+	-- ③ 降下（家へ）
+	if not carryStop() then
+		status("帰還: 降下")
+		flyToChilli(home, CFG.SpeedHome, carryStop, CFG.HomeTimeLimit)
+	end
+
+	-- ④ 着地と納品
+	status("納品中")
 	local settle = 0
 	while settle < 2 and state.Carrying and state.Delivered < deliveryStartAt and not state.Cancel do
 		settle += RunService.Heartbeat:Wait()
 	end
 
-	-- ★ 絶対に卵を落とす
 	if state.Carrying and state.Delivered < deliveryStartAt and not state.Cancel then
-		status("納品中")
 		local h = hum()
-		if h then pcall(function() h.PlatformStand = false; h:Move(Vector3.zero, false) end) end
+		if h then
+			pcall(function()
+				h.PlatformStand = false
+				h:Move(Vector3.zero, false)
+			end)
+		end
 		task.wait(0.2)
+		-- ★ 卵を落とす（これがないと検知されない）
 		dropEgg()
 		
 		local waited = 0
@@ -673,9 +770,9 @@ local function runHome(deliveryStartAt)
 			waited += RunService.Heartbeat:Wait()
 		end
 	end
+
 	return state.Delivered >= deliveryStartAt
 end
-
 local function stealAndDeliver(uid, retry)
 	if state.Busy then return false end
 	state.Busy = true
