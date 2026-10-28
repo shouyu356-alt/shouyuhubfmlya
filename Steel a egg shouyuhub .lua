@@ -1,5 +1,5 @@
 -- ============================================================
--- ShouyuHub | Safe Hop Auto Steal (Original UI)
+-- ShouyuHub | Ultimate Steal (Decoy TP)
 -- Part 1/8: Config / Dependencies
 -- ============================================================
 local Players           = game:GetService("Players")
@@ -10,11 +10,15 @@ local TweenService      = game:GetService("TweenService")
 local localPlayer       = Players.LocalPlayer
 
 local CFG = {
-	-- 移動設定
-	HopStep = 60,       -- ★ 95から60に戻す
-	HopDelay = 0.3,     -- ★ 0.15から0.3に戻す
+	-- TP移動設定
+	HopStep = 95,       -- 1回のワープ距離 (アンチチート限界の手前)
+	HopDelay = 0.1,     -- 待機時間 (秒速950スタッズ相当)
+	
+	-- 掴み設定
 	GrabRadius = 15,
 	GrabRetrySec = 1.5,
+	
+	-- その他
 	StealTimeLimit = 120,
 	HomeTimeLimit = 45,
 	MaxRetries = 3,
@@ -54,7 +58,7 @@ local statusLabel = nil
 local function status(text) if statusLabel then statusLabel.Text = tostring(text) end end-- ============================================================
 -- Part 2/8: State + Events
 -- ============================================================
-local state = { Carrying = false, Uid = nil, Busy = false, Cancel = false, Delivered = 0, SentDropAt = 0 }
+local state = { Carrying = false, Uid = nil, Busy = false, Cancel = false, Delivered = 0 }
 
 if type(EggState) == "table" and type(EggState.CarryChanged) == "table" then
 	EggState.CarryChanged:Connect(function(arg)
@@ -80,7 +84,6 @@ end
 
 local function dropEgg()
 	if type(EggState) == "table" and type(EggState.DropFieldEgg) == "function" then
-		state.SentDropAt = os.clock()
 		pcall(EggState.DropFieldEgg, "PlayerRequest")
 	end
 	end-- ============================================================
@@ -165,17 +168,40 @@ local function promptNear(pos, rad)
 	end
 	return best
 		end-- ============================================================
--- Part 4/8: Hop Engine (60 studs / 0.3 sec)
+-- Part 4/8: Ultimate TP Engine
 -- ============================================================
 local function hopTo(targetPos, checkFn)
+	local cam = workspace.CurrentCamera
+	local oldCamType = cam.CameraType
+	pcall(function() cam.CameraType = Enum.CameraType.Scriptable; cam.CFrame = cam.CFrame end)
+	
+	local canSetFps = typeof(setfpscap) == "function"
+	if canSetFps then pcall(setfpscap, 30) end
+	
+	-- 偽装クローン配置
+	local character = localPlayer.Character
+	local decoy = nil
+	if character then
+		local wasArchivable = character.Archivable
+		character.Archivable = true
+		decoy = character:Clone()
+		character.Archivable = wasArchivable
+		if decoy then
+			for _, d in ipairs(decoy:GetDescendants()) do
+				if d:IsA("LuaSourceContainer") or d:IsA("Humanoid") then
+					d:Destroy()
+				elseif d:IsA("BasePart") then
+					d.Anchored = true; d.CanCollide = false; d.CanTouch = false; d.CanQuery = false
+				end
+			end
+			decoy.Name = "Decoy_Clone"
+			decoy.Parent = workspace
+		end
+	end
+
 	local r = root()
 	if not r then return false end
 	
-	-- カメラ固定
-	local cam = workspace.CurrentCamera
-	local oldType = cam.CameraType
-	pcall(function() cam.CameraType = Enum.CameraType.Scriptable; cam.CFrame = cam.CFrame end)
-
 	while not state.Cancel do
 		if checkFn and checkFn() then break end
 		r = root()
@@ -183,21 +209,33 @@ local function hopTo(targetPos, checkFn)
 		
 		local flat = Vector3.new(targetPos.X - r.Position.X, 0, targetPos.Z - r.Position.Z)
 		if flat.Magnitude <= CFG.HopStep then
-			pcall(function() r.CFrame = CFrame.new(targetPos + Vector3.new(0, 3, 0)); r.AssemblyLinearVelocity = Vector3.zero end)
+			pcall(function()
+				r.CFrame = CFrame.new(targetPos + Vector3.new(0, 3, 0))
+				r.AssemblyLinearVelocity = Vector3.zero
+			end)
 			break
 		end
 		
 		local nextPos = r.Position + flat.Unit * CFG.HopStep + Vector3.new(0, 3, 0)
-		pcall(function() r.CFrame = CFrame.new(nextPos); r.AssemblyLinearVelocity = Vector3.zero end)
+		pcall(function()
+			r.CFrame = CFrame.new(nextPos)
+			r.AssemblyLinearVelocity = Vector3.zero
+			r.AssemblyAngularVelocity = Vector3.zero
+		end)
 		
 		task.wait(CFG.HopDelay)
 		
-		-- 引き戻し検知
+		-- ロールバックされたら少し待つ
 		local check = root()
-		if check and (check.Position - nextPos).Magnitude > 20 then task.wait(0.2) end
+		if check and (check.Position - nextPos).Magnitude > 30 then
+			task.wait(0.1)
+		end
 	end
+
+	if decoy then pcall(function() decoy:Destroy() end) end
+	pcall(function() cam.CameraType = oldCamType end)
+	if canSetFps then pcall(setfpscap, 240) end
 	
-	pcall(function() cam.CameraType = oldType end)
 	return true
 end
 
@@ -306,7 +344,7 @@ local function stopAutoLoop()
 	autoLoop.Active = false
 	if autoLoop.Thread then pcall(task.cancel, autoLoop.Thread); autoLoop.Thread = nil end
 				end-- ============================================================
--- Part 6/8: UI Construction (ShouyuHub)
+-- Part 6/8: UI Construction
 -- ============================================================
 print("[ShouyuHub] UI 構築開始")
 local UI_W, UI_H, UI_H_MIN = 300, 440, 64
