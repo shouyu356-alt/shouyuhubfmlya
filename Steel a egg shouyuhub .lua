@@ -1,30 +1,27 @@
--- yslemEgg | Complete Rebuild
-local Players = game:GetService("Players")
-local RunService = game:GetService("RunService")
+-- ShouyuHub | Steal an Egg (Light Blue) - Fixed
+local Players           = game:GetService("Players")
+local RunService        = game:GetService("RunService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
-local UserInputService = game:GetService("UserInputService")
-local TweenService = game:GetService("TweenService")
-local CoreGui = game:GetService("CoreGui")
-local localPlayer = Players.LocalPlayer
+local UserInputService  = game:GetService("UserInputService")
+local TweenService      = game:GetService("TweenService")
+local CoreGui           = game:GetService("CoreGui")
+local localPlayer       = Players.LocalPlayer
+local IS_MOBILE         = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
 
------------------------------------------------------------------- 設定
 local CFG = {
-	SpeedToEgg = 6500,    -- ★ 行く時
-	SpeedHome = 300,      -- ★ 帰る時（空中移動）
-	SpeedCap = 1.15,
+	SpeedToEgg   = 6500,   -- 行く時の速度
+	SpeedHome    = 300,    -- 帰る時の速度 (空中移動)
 	GrabInterval = 0.03,
-	RegrabFar = 40,
-	Height = 70,          -- 帰る時の上空高度
-	AutoRefresh = 4,
+	RegrabFar    = 40,
+	Height       = 70,     -- 帰る時の上空高度
+	AutoRefresh  = 4,
 }
-local FPS = { 60, 30, 0.15 }
 
--- 薄水色テーマ
 local THEME = {
 	Bg         = Color3.fromRGB(15, 20, 30),
 	Panel      = Color3.fromRGB(25, 35, 50),
 	Card       = Color3.fromRGB(35, 50, 70),
-	Accent     = Color3.fromRGB(120, 220, 255),
+	Accent     = Color3.fromRGB(120, 220, 255), -- 薄水色
 	AccentSoft = Color3.fromRGB(200, 240, 255),
 	AccentDeep = Color3.fromRGB(40, 100, 140),
 	Text       = Color3.fromRGB(240, 245, 255),
@@ -38,8 +35,8 @@ local function safeRequire(getter)
 end
 
 local networkingFolder = ReplicatedStorage:WaitForChild("Packages"):WaitForChild("Networking")
-local EggState = safeRequire(function() return ReplicatedStorage.Client.EggState end)
-local Assets = safeRequire(function() return ReplicatedStorage.Data.Assets end)
+local EggState  = safeRequire(function() return ReplicatedStorage.Client.EggState end)
+local Assets    = safeRequire(function() return ReplicatedStorage.Data.Assets end)
 local Mutations = safeRequire(function() return ReplicatedStorage.Shared.Modules.Mutations end)
 
 local function remote(name) return networkingFolder:FindFirstChild(name) end
@@ -48,7 +45,7 @@ local function root()
 	return character and character:FindFirstChild("HumanoidRootPart")
 end
 
------------------------------------------------------------------- シールド
+-- シールド
 local shield = { Original = nil, Clone = nil, Links = {}, Connection = nil, Added = nil }
 
 local function walkSpeed()
@@ -119,7 +116,7 @@ local function shieldSwap()
 		if clone.Parent ~= nil then clone.WalkSpeed = humanoid.WalkSpeed end
 	end))
 
-	local animator = humanoid:FindFirstChildOfClass("Animator")
+	local animator  = humanoid:FindFirstChildOfClass("Animator")
 	local animator2 = clone:FindFirstChildOfClass("Animator")
 	if animator and animator2 then
 		table.insert(shield.Links, animator.AnimationPlayed:Connect(function(played)
@@ -197,7 +194,7 @@ local function shieldStop()
 	if shield.Connection then shield.Connection:Disconnect(); shield.Connection = nil end
 	if shield.Added then shield.Added:Disconnect(); shield.Added = nil end
 	shieldUndo()
-end------------------------------------------------------------------ ステート
+end-- ステート
 local state = { Carrying = false, Uid = nil, Delivered = 0, Busy = false, Cancel = false, Mult = 1, HeldSeen = 0, GuessedDrop = false }
 
 if type(EggState) == "table" and type(EggState.CarryChanged) == "table" and type(EggState.CarryChanged.Connect) == "function" then
@@ -216,7 +213,9 @@ if type(EggState) == "table" and type(EggState.CarryChanged) == "table" and type
 end
 
 pcall(function()
-	remote("RE/EggWorld/FieldEggRedeemVerdict").OnClientEvent:Connect(function() state.Delivered = os.clock() end)
+	remote("RE/EggWorld/FieldEggRedeemVerdict").OnClientEvent:Connect(function()
+		state.Delivered = os.clock()
+	end)
 end)
 
 local function takeEgg(uid)
@@ -301,7 +300,8 @@ end
 
 local function lineInfo()
 	local world = workspace:FindFirstChild("World") or workspace:FindFirstChild("__OBJECTS")
-	world = world and world:FindFirstChild("Areas") and world:FindFirstChild("SeparationLine")
+	world = world and world:FindFirstChild("Areas")
+	world = world and world:FindFirstChild("SeparationLine")
 	local ok = world and world:IsA("BasePart")
 	return ok and world.Position.X or 552.2, ok and world.Position.Y or 67.67
 end
@@ -317,8 +317,82 @@ local function homePoint()
 		if node and node:IsA("BasePart") then return node.CFrame:PointToWorldSpace(def[2]) end
 	end
 	return Vector3.new(528.7, 70.57, -364.11)
-	endlocal status = function(text) end
+end
 
+local dangerCache, dangerAt = {}, 0
+local function dangers()
+	if os.clock() - dangerAt < 1 then return dangerCache end
+	dangerAt = os.clock()
+	local list = {}
+	local function add(inst)
+		local ok, cf, size = pcall(function()
+			if inst:IsA("Model") then return inst:GetBoundingBox()
+			elseif inst:IsA("BasePart") then return inst.CFrame, inst.Size end
+		end)
+		if ok and cf and size then
+			local half = Vector3.new(math.abs(size.X), 0, math.abs(size.Z)) * 0.5
+			local rot = (cf - cf.Position):VectorToWorldSpace(half)
+			local rx = math.max(math.abs(rot.X), half.X, half.Z)
+			local rz = math.max(math.abs(rot.Z), half.X, half.Z)
+			list[#list + 1] = { MinX = cf.Position.X - rx, MaxX = cf.Position.X + rx, MinZ = cf.Position.Z - rz, MaxZ = cf.Position.Z + rz }
+		end
+	end
+	local function bad(name)
+		if name == "ScrambleLocalVisuals" or name == "DrScrambleEvent" then return false end
+		name = string.lower(name)
+		return string.find(name, "portal", 1, true) or string.find(name, "teleport", 1, true) or string.find(name, "mech", 1, true) or string.find(name, "arena", 1, true) or string.find(name, "scramble", 1, true)
+	end
+	for _, child in ipairs(workspace:GetChildren()) do
+		if (child:IsA("Model") or child:IsA("BasePart") or child:IsA("Folder")) and bad(child.Name) then
+			if child:IsA("Folder") then for _, inner in ipairs(child:GetChildren()) do add(inner) end
+			else add(child) end
+		end
+	end
+	local build = workspace:FindFirstChild("World")
+	build = build and build:FindFirstChild("Build")
+	if build then
+		for _, child in ipairs(build:GetChildren()) do
+			if bad(child.Name) then for _, inner in ipairs(child:GetChildren()) do add(inner) end end
+		end
+	end
+	dangerCache = list
+	return list
+end
+
+local function avoid(from, to)
+	for _, d in ipairs(dangers()) do
+		local x0, x1, z0, z1 = d.MinX - 12, d.MaxX + 12, d.MinZ - 12, d.MaxZ + 12
+		local inside = from.X >= x0 and from.X <= x1 and from.Z >= z0 and from.Z <= z1
+		if not inside then
+			local t0, t1, hit = 0, 1, true
+			for _, axis in ipairs({ { from.X, to.X - from.X, x0, x1 }, { from.Z, to.Z - from.Z, z0, z1 } }) do
+				local pos, delta, lo, hi = axis[1], axis[2], axis[3], axis[4]
+				if math.abs(delta) < 1e-6 then
+					if pos < lo or pos > hi then hit = false end
+				else
+					local ta, tb = (lo - pos) / delta, (hi - pos) / delta
+					if ta > tb then ta, tb = tb, ta end
+					t0, t1 = math.max(t0, ta), math.min(t1, tb)
+					if t0 > t1 then hit = false end
+				end
+			end
+			if hit then
+				local zLow, zHigh = z0 - 2, z1 + 2
+				local z = math.abs(from.Z - zLow) <= math.abs(from.Z - zHigh) and zLow or zHigh
+				if z < -440 or z > -290 then z = z == zLow and zHigh or zLow end
+				local x = math.abs(from.X - x0) <= math.abs(from.X - x1) and x0 or x1
+				if math.abs(from.Z - z) < 3 then
+					x = math.abs(to.X - x0) <= math.abs(to.X - x1) and x0 or x1
+				end
+				return Vector3.new(x, to.Y, z)
+			end
+		end
+	end
+	return to
+	end-- 走りロジック
+local status = function(text) end
+
+-- 卵へ走る（速度6500：CFrameワープ）
 local function runToEgg(uid, egg)
 	local lineX = lineInfo()
 	local home = homePoint()
@@ -326,7 +400,9 @@ local function runToEgg(uid, egg)
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
 	if humanoid then
 		humanoid.PlatformStand = false
-		if character:FindFirstChildWhichIsA("Tool") then pcall(function() humanoid:UnequipTools() end) end
+		if character:FindFirstChildWhichIsA("Tool") then
+			pcall(function() humanoid:UnequipTools() end)
+		end
 	end
 
 	local r = root()
@@ -341,18 +417,21 @@ local function runToEgg(uid, egg)
 		r = root()
 		if not r then return false end
 		local flatEgg = Vector3.new(egg.X - r.Position.X, 0, egg.Z - r.Position.Z)
-		if stage == "field" and flatEgg.Magnitude <= 2.5 then break end
+		if stage == "field" and flatEgg.Magnitude <= 3.5 then break end
 		local target = egg
 		if stage == "safe" then
 			if Vector3.new(home.X - r.Position.X, 0, home.Z - r.Position.Z).Magnitude <= 6 then
 				stage = "field"
-			else target = home end
+			else
+				target = home
+			end
 		end
 
-		local flat = Vector3.new(target.X - r.Position.X, 0, target.Z - r.Position.Z)
+		local waypoint = avoid(r.Position, target)
+		local flat = Vector3.new(waypoint.X - r.Position.X, 0, waypoint.Z - r.Position.Z)
 		local unit = flat.Magnitude > 0.01 and flat.Unit or Vector3.zero
 		
-		-- 速度6500のCFrameワープ
+		-- ★ CFrameワープ（速度6500対応）
 		local dt = math.max(RunService.Heartbeat:Wait(), 1/60)
 		local step = math.min(CFG.SpeedToEgg * dt, flat.Magnitude)
 		pcall(function()
@@ -383,6 +462,7 @@ local function runToEgg(uid, egg)
 	return state.Carrying or (r ~= nil and Vector3.new(egg.X - r.Position.X, 0, egg.Z - r.Position.Z).Magnitude <= 6)
 end
 
+-- 卵を掴む
 local function grab(uid, timeout)
 	local cache = { At = 0 }
 	local waited, since = 0, 1
@@ -392,8 +472,10 @@ local function grab(uid, timeout)
 		if r and egg then
 			local flat = Vector3.new(egg.X - r.Position.X, 0, egg.Z - r.Position.Z)
 			if flat.Magnitude > 2 then
-				local v = flat.Unit * math.min(walkSpeed() * CFG.SpeedCap, flat.Magnitude / 0.05)
-				pcall(function() r.AssemblyLinearVelocity = Vector3.new(v.X, r.AssemblyLinearVelocity.Y, v.Z) end)
+				local v = flat.Unit * math.min(walkSpeed() * 1.15, flat.Magnitude / 0.05)
+				pcall(function()
+					r.AssemblyLinearVelocity = Vector3.new(v.X, r.AssemblyLinearVelocity.Y, v.Z)
+				end)
 			end
 		end
 
@@ -409,18 +491,19 @@ local function grab(uid, timeout)
 			end
 			task.spawn(takeEgg, uid)
 		end
+		
 		local dt = math.max(RunService.Heartbeat:Wait(), 1/240)
 		waited += dt
 		since += dt
 	end
 	return state.Carrying and state.Uid == uid
-		end-- ★ 空中を移動して帰る（速度300）
+		end-- 帰る（Instant TPなし / 空中移動 速度300）
 local function runHome(lineX, laneZ)
 	local started = os.clock()
 	local home = homePoint()
 	local character = localPlayer.Character
 	local humanoid = character and character:FindFirstChildOfClass("Humanoid")
-	if humanoid then humanoid.PlatformStand = true end -- 空中モード
+	if humanoid then humanoid.PlatformStand = true end
 
 	local r = root()
 	if not r then return false end
@@ -465,6 +548,7 @@ local function runHome(lineX, laneZ)
 	return state.Delivered >= started
 end
 
+-- 盗んで納品
 local function stealAndDeliver(uid)
 	if state.Busy then return end
 	state.Busy = true
@@ -473,18 +557,29 @@ local function stealAndDeliver(uid)
 		local ok, err = pcall(function()
 			status("Looking for the egg")
 			local egg = eggPosition(uid)
-			if not egg then status("That egg is gone"); return end
+			if not egg then
+				status("That egg is gone")
+				return
+			end
 			if state.Carrying and state.Uid ~= uid then
 				dropEgg()
 				local waited = 0
-				while state.Carrying and waited < 1 do waited += RunService.Heartbeat:Wait() end
+				while state.Carrying and waited < 1 do
+					waited += RunService.Heartbeat:Wait()
+				end
 			end
 			
 			status("Going to the egg")
-			if not runToEgg(uid, egg) then status("Could not reach the egg"); return end
+			if not runToEgg(uid, egg) then
+				status("Could not reach the egg")
+				return
+			end
 			
 			status("Taking the egg")
-			if not grab(uid, 4) then status("The egg would not come free"); return end
+			if not grab(uid, 4) then
+				status("The egg would not come free")
+				return
+			end
 			
 			local lineX, _ = lineInfo()
 			local current = root()
@@ -494,17 +589,20 @@ local function stealAndDeliver(uid)
 			status(delivered and "Delivered" or "Delivery failed")
 		end)
 		
-		if not ok then status("Error: " .. tostring(err)) end
+		if not ok then
+			status("Error: " .. tostring(err))
+		end
 		state.Busy = false
 	end)
-			end------------------------------------------------------------------ UI構築
+			end-- UI構築
 print("[ShouyuHub] UI構築開始")
 
 local UI = { W = 260, H = 380, Scale = 0.45, Minimized = false }
 local UI_W, UI_H, UI_H_MIN = UI.W, UI.H, 48
 
 local function getParent()
-	return localPlayer:WaitForChild("PlayerGui")
+	local pg = localPlayer:FindFirstChildOfClass("PlayerGui")
+	return pg or localPlayer:WaitForChild("PlayerGui")
 end
 
 local gui = Instance.new("ScreenGui")
@@ -784,7 +882,10 @@ local refreshBtn = mkBtn("更新", UDim2.new(0, 0, 1, -44), UDim2.new(0.4, -2, 0
 local instantBtn = mkBtn("即盗み", UDim2.new(0.4, 2, 1, -44), UDim2.new(0.6, -2, 0, 40), THEME.AccentDeep)
 
 refreshBtn.MouseButton1Click:Connect(function()
-	if not state.Busy then rebuild(); statusLbl.Text = "更新完了" end
+	if not state.Busy then 
+		rebuild() 
+		statusLbl.Text = "更新完了" 
+	end
 end)
 
 instantBtn.MouseButton1Click:Connect(function()
