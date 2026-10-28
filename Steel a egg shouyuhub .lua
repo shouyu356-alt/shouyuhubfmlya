@@ -1,7 +1,7 @@
 -- ============================================================
--- ShouyuHub | Steal an Egg - Auto Steal (Rebuilt)
+-- ShouyuHub | Auto Steal (Rebuilt v2)
 -- Part 1/8: Header / Config / Dependencies
--- 反省点: 速度6500維持 / 制御はtrackedPos / 帰りは1000 / DropFieldEgg必須
+-- 核心: 地面追従 / 壁は回り込む / 一発到達 / DropFieldEgg必須
 -- ============================================================
 local Players           = game:GetService("Players")
 local RunService        = game:GetService("RunService")
@@ -12,35 +12,34 @@ local localPlayer       = Players.LocalPlayer
 
 local CFG = {
 	-- 移動
-	SpeedToEgg      = 6500,    -- 行き（競争に勝つため）
+	SpeedToEgg      = 6500,    -- 行き
 	SpeedHome       = 1000,    -- 帰り
-	Height          = 70,      -- 上空回避の高さ
 	Decel           = 200000,  -- 減速度（6500でも108studs手前で減速開始）
+	GroundOffset    = 2,       -- 地面から2studs上を滑る
+	MaxDrift        = 60,      -- ドリフト許容（超えたら再同期）
+	ArriveDist      = 5,       -- 水平到着距離
 
-	-- 到着・掴み
-	ArriveDist      = 4,
-	GrabRadius      = 10,
+	-- 掴み
+	GrabRadius      = 12,
 	GrabInterval    = 0.03,
-	GrabTimeout     = 4,
-	GrabRetrySec    = 1.0,
+	GrabRetrySec    = 1.2,
 
 	-- タイムアウト
 	StealTimeLimit  = 120,
 	HomeTimeLimit   = 45,
-	RagdollTimeout  = 5,
+	RagdollTimeout  = 6,
 
 	-- リトライ
-	MaxRetries      = 3,
-	RetryGap        = 2,
+	MaxRetries      = 5,
+	RetryGap        = 1.2,
 	BlockedSec      = 30,
 
 	-- ポーリング
 	SnapshotTTL     = 0.5,
-	FieldPoll       = 1.0,
 	AutoRefresh     = 3,
 
-	-- ドリフト
-	MaxDrift        = 40,
+	-- 壁
+	WallScanRadius  = 15,      -- 壁から15studs離れる
 }
 
 local THEME = {
@@ -88,7 +87,6 @@ end
 
 print("[ShouyuHub] Part 1/8 ready")-- ============================================================
 -- Part 2/8: Shield (Humanoid Swap)
--- 反省点: 常時オンだと干渉リスク → 移動関数開始/終了で制御
 -- ============================================================
 local shield = { Original = nil, Clone = nil, Links = {}, Connection = nil, Added = nil }
 
@@ -248,8 +246,7 @@ local function walkSpeed()
 end
 
 print("[ShouyuHub] Part 2/8 ready")-- ============================================================
--- Part 3/8: State + Carry Verification + UID Matching
--- 反省点: 納品UID照合 / 他プレイヤー取得検知 / キャリー速度倍率
+-- Part 3/8: State + Carry + UID + DropFieldEgg
 -- ============================================================
 local state = {
 	Carrying      = false,
@@ -272,9 +269,7 @@ if type(EggState) == "table" and type(EggState.CarryChanged) == "table"
 		state.GuessedDrop = false
 		if carrying then
 			state.HeldSeen = os.clock()
-			if type(arg.Uid) == "string" then
-				state.Uid = arg.Uid
-			end
+			if type(arg.Uid) == "string" then state.Uid = arg.Uid end
 			local mult = tonumber(arg.SpeedMultiplier)
 			if mult and mult > 0 then state.Mult = mult end
 		end
@@ -282,7 +277,7 @@ if type(EggState) == "table" and type(EggState.CarryChanged) == "table"
 	end)
 end
 
--- ★ 納品UID照合（必須）
+-- ★ 納品UID照合
 pcall(function()
 	local re = remote("RE/EggWorld/FieldEggRedeemVerdict")
 	if not re or not re:IsA("RemoteEvent") then return end
@@ -290,24 +285,17 @@ pcall(function()
 		local args = { ... }
 		local uid = nil
 		for _, v in ipairs(args) do
-			if type(v) == "table" and type(v.Uid) == "string" then
-				uid = v.Uid
-				break
-			elseif type(v) == "string" and v == state.Uid then
-				uid = v
-				break
-			end
+			if type(v) == "table" and type(v.Uid) == "string" then uid = v.Uid; break
+			elseif type(v) == "string" and v == state.Uid then uid = v; break end
 		end
 		if uid ~= nil then
 			if uid == state.Uid or state.Carrying == false then
 				state.Delivered = os.clock()
 				state.DeliveryUid = uid
 			end
-		else
-			if state.SentDropAt > 0 and os.clock() - state.SentDropAt < 3 then
-				state.Delivered = os.clock()
-				state.DeliveryUid = state.Uid
-			end
+		elseif state.SentDropAt > 0 and os.clock() - state.SentDropAt < 3 then
+			state.Delivered = os.clock()
+			state.DeliveryUid = state.Uid
 		end
 	end)
 end)
@@ -319,11 +307,21 @@ local function takeEgg(uid)
 	end
 end
 
+-- ★ DropFieldEgg（必須 / フォールバック付き）
 local function dropEgg()
 	if type(EggState) == "table" and type(EggState.DropFieldEgg) == "function" then
 		state.SentDropAt = os.clock()
-		pcall(EggState.DropFieldEgg, "PlayerRequest")
+		local ok = pcall(EggState.DropFieldEgg, "PlayerRequest")
+		if ok then return true end
 	end
+	-- フォールバック: リモート直叩き
+	local re = remote("RE/EggWorld/RequestDrop")
+	if re and re:IsA("RemoteEvent") then
+		state.SentDropAt = os.clock()
+		pcall(function() re:FireServer("PlayerRequest") end)
+		return true
+	end
+	return false
 end
 
 local function heldByMe(uid)
@@ -342,7 +340,7 @@ local function heldByMe(uid)
 	return false
 end
 
--- ★ 他プレイヤー取得検知（改善点の核）
+-- ★ 他プレイヤー取得検知
 local function heldByOther(uid)
 	if type(uid) ~= "string" then return false end
 	local egg = workspace:FindFirstChild(uid)
@@ -357,9 +355,7 @@ local function heldByOther(uid)
 						local model = p:FindFirstAncestorOfClass("Model")
 						if model and model ~= myChar then
 							local plr = Players:GetPlayerFromCharacter(model)
-							if plr and plr ~= localPlayer then
-								return true
-							end
+							if plr and plr ~= localPlayer then return true end
 						end
 					end
 				end
@@ -369,12 +365,11 @@ local function heldByOther(uid)
 	return false
 end
 
--- ★ キャリー速度倍率を反映（反省点）
 local function carrySpeed(base)
 	return base * (tonumber(state.Mult) or 1)
 end
 
--- Weld監視（保険）
+-- Weld監視
 task.spawn(function()
 	while true do
 		task.wait(0.2)
@@ -390,9 +385,10 @@ task.spawn(function()
 	end
 end)
 
-print("[ShouyuHub] Part 3/8 ready")-- ============================================================
--- Part 4/8: Navigation + Snapshot + Egg Info + Avoidance
--- 反省点: スナップショットTTL / 連鎖回避 / 情報に重量追加
+print("[ShouyuHub] Part 3/8 ready")
+-- ============================================================
+-- Part 4/8: Navigation + Snapshot + GroundY + Wall Avoidance
+-- 核心: GUARD NO COLLIDE 壁を明示的に検出
 -- ============================================================
 
 local function money(value)
@@ -429,14 +425,12 @@ local function homePoint()
 	}) do
 		local node = workspace
 		for _, name in ipairs(def[1]) do node = node and node:FindFirstChild(name) or nil end
-		if node and node:IsA("BasePart") then
-			return node.CFrame:PointToWorldSpace(def[2])
-		end
+		if node and node:IsA("BasePart") then return node.CFrame:PointToWorldSpace(def[2]) end
 	end
 	return Vector3.new(528.7, 70.57, -364.11)
 end
 
--- ★ スナップショットTTL（反省点）
+-- スナップショットTTL
 local snapshotCache = { At = 0, List = {} }
 local function snapshot(force)
 	local now = os.clock()
@@ -471,18 +465,14 @@ local function eggPosition(uid, force)
 	return nil
 end
 
--- 卵情報（重量付き）
+-- 卵情報
 local function describe(record)
 	local directory = type(Assets) == "table" and Assets.Directory or nil
 	local entry = type(directory) == "table" and directory[tostring(record.AssetCategory)] or nil
 	local info = {
-		Uid = record.Uid,
-		Category = tostring(record.AssetCategory),
-		Name = tostring(record.AssetCategory),
-		Icon = "",
-		Rarity = 0,
-		Value = 0,
-		Weight = 0,
+		Uid = record.Uid, Category = tostring(record.AssetCategory),
+		Name = tostring(record.AssetCategory), Icon = "",
+		Rarity = 0, Value = 0, Weight = 0,
 	}
 	if type(entry) == "table" then
 		info.Name = tostring(entry.DisplayName or record.AssetCategory)
@@ -510,10 +500,30 @@ local function describe(record)
 	return info
 end
 
--- 危険地帯（動的収集）
+-- ★ 地面Y座標（レイキャスト）
+local rayParams = RaycastParams.new()
+rayParams.FilterType = Enum.RaycastFilterType.Exclude
+rayParams.RespectCanCollide = true
+
+local function refreshRayFilter()
+	local filters = {}
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr.Character then table.insert(filters, plr.Character) end
+	end
+	rayParams.FilterDescendantsInstances = filters
+end
+
+local function groundY(x, z, fallbackY)
+	local origin = Vector3.new(x, (fallbackY or 100) + 100, z)
+	local hit = workspace:Raycast(origin, Vector3.new(0, -400, 0), rayParams)
+	if hit then return hit.Position.Y end
+	return fallbackY or 0
+end
+
+-- ★ 危険地帯（GUARD NO COLLIDE 壁を明示検出）
 local dangerCache, dangerAt = {}, 0
 local function dangers()
-	if os.clock() - dangerAt < 1 then return dangerCache end
+	if os.clock() - dangerAt < 0.8 then return dangerCache end
 	dangerAt = os.clock()
 	local list = {}
 	local function addBox(cf, size)
@@ -534,10 +544,32 @@ local function dangers()
 		end)
 		if ok and cf and size then addBox(cf, size) end
 	end
+
+	-- ① GUARD NO COLLIDE 壁（最重要）
+	local world = workspace:FindFirstChild("World") or workspace:FindFirstChild("__OBJECTS")
+	local build = world and world:FindFirstChild("Build")
+	if build then
+		for _, child in ipairs(build:GetChildren()) do
+			local collisions = child:FindFirstChild("COLLISIONS")
+			local noCollide = collisions and collisions:FindFirstChild("GUARD NO COLLIDE")
+			if noCollide then
+				for _, wall in ipairs(noCollide:GetChildren()) do
+					if wall.Name == "WALL LEFT" or wall.Name == "WALL RIGHT" then
+						if wall:IsA("BasePart") then add(wall) end
+						for _, desc in ipairs(wall:GetDescendants()) do
+							if desc:IsA("BasePart") then add(desc) end
+						end
+					end
+				end
+			end
+		end
+	end
+
+	-- ② 一般危険地帯（portal / mech 等）
 	local function bad(name)
 		if name == "ScrambleLocalVisuals" or name == "DrScrambleEvent" then return false end
 		name = string.lower(name)
-		for _, pat in ipairs({ "portal", "teleport", "mech", "arena", "scramble" }) do
+		for _, pat in ipairs({ "portal", "teleport", "mech", "arena" }) do
 			if string.find(name, pat, 1, true) then return true end
 		end
 		return false
@@ -551,26 +583,18 @@ local function dangers()
 			end
 		end
 	end
-	local world = workspace:FindFirstChild("World")
-	local build = world and world:FindFirstChild("Build")
-	if build then
-		for _, child in ipairs(build:GetChildren()) do
-			if bad(child.Name) then
-				for _, inner in ipairs(child:GetChildren()) do add(inner) end
-			end
-		end
-	end
+
 	dangerCache = list
 	return list
 end
 
--- 連鎖回避（反省点）
+-- ★ 連鎖回避（壁を回り込む）
 local function avoid(from, to)
 	for _ = 1, 3 do
 		local moved = false
 		for _, d in ipairs(dangers()) do
-			local x0, x1 = d.MinX - 12, d.MaxX + 12
-			local z0, z1 = d.MinZ - 12, d.MaxZ + 12
+			local x0, x1 = d.MinX - CFG.WallScanRadius, d.MaxX + CFG.WallScanRadius
+			local z0, z1 = d.MinZ - CFG.WallScanRadius, d.MaxZ + CFG.WallScanRadius
 			local inside = from.X >= x0 and from.X <= x1 and from.Z >= z0 and from.Z <= z1
 			if not inside then
 				local t0, t1, hit = 0, 1, true
@@ -589,10 +613,11 @@ local function avoid(from, to)
 					end
 				end
 				if hit then
-					local zLow, zHigh = z0 - 2, z1 + 2
+					-- 壁の手前で一度止まり、横にずれて迂回
+					local zLow, zHigh = z0 - 3, z1 + 3
 					local z = math.abs(from.Z - zLow) <= math.abs(from.Z - zHigh) and zLow or zHigh
 					local x = math.abs(from.X - x0) <= math.abs(from.X - x1) and x0 or x1
-					if math.abs(from.Z - z) < 3 then
+					if math.abs(from.Z - z) < 4 then
 						x = math.abs(to.X - x0) <= math.abs(to.X - x1) and x0 or x1
 					end
 					to = Vector3.new(x, to.Y, z)
@@ -607,7 +632,6 @@ end
 
 print("[ShouyuHub] Part 4/8 ready")-- ============================================================
 -- Part 5/8: Field State + Ragdoll + Movement Lock
--- 反省点: 夜/壁待機 / ラグドール多重判定 / 移動権排他
 -- ============================================================
 
 local function isNight()
@@ -630,7 +654,6 @@ local function fieldLocked()
 	return isNight() or wallSealed()
 end
 
--- ★ ラグドール多重判定（反省点）
 local function isRagdolled()
 	if type(RagdollModule) == "table" and type(RagdollModule.IsRagdolled) == "function" then
 		local ok, res = pcall(RagdollModule.IsRagdolled, localPlayer.Character)
@@ -658,7 +681,6 @@ local function waitRagdollEnd(timeout)
 	return not isRagdolled()
 end
 
--- ★ 移動権管理（反省点）
 local Movement = { Owner = nil }
 local function claim(owner)
 	if Movement.Owner == nil or Movement.Owner == owner then
@@ -671,7 +693,6 @@ local function release(owner)
 	if Movement.Owner == owner then Movement.Owner = nil end
 end
 
--- プロンプト探索
 local function promptNear(position, radius)
 	local best, bestDist = nil, radius
 	for _, child in ipairs(workspace:GetChildren()) do
@@ -687,8 +708,8 @@ local function promptNear(position, radius)
 end
 
 print("[ShouyuHub] Part 5/8 ready")-- ============================================================
--- Part 6/8: Fly Controller (trackedPos + Decel + Predictive Arrival)
--- 反省点: 6500維持 / オーバーシュート防止 / ラグドール中断 / ドリフト検知
+-- Part 6/8: Ground Fly Controller
+-- 核心: 地面追従 / ラグドールは一時停止 / スタック時ジャンプ
 -- ============================================================
 local Fly = {
 	Active = false, Target = nil, TrackedPos = nil,
@@ -712,8 +733,7 @@ local function flyStop()
 	Fly.Arrived, Fly.Cancelled, Fly.Displaced = false, false, false
 end
 
--- 戻り値: (ok, reason) reason = "arrived" | "cancelled" | "displaced" | "timeout"
-local function flyTo(target, speed, checkFn, timeout)
+local function flyToGround(targetPos, speed, checkFn, timeout)
 	speed = speed or Fly.Speed
 	timeout = timeout or 60
 	if Fly.Active then flyStop() end
@@ -722,6 +742,8 @@ local function flyTo(target, speed, checkFn, timeout)
 	local r = root()
 	if not r or not c then return false, "no-character" end
 
+	refreshRayFilter()
+
 	local h = hum()
 	if h then pcall(function()
 		h.PlatformStand = true
@@ -729,47 +751,103 @@ local function flyTo(target, speed, checkFn, timeout)
 	end) end
 
 	Fly.Active = true
-	Fly.Target = target
+	Fly.Target = targetPos
 	Fly.TrackedPos = r.Position
 	Fly.Speed = speed
 	Fly.Character = c
 	Fly.Arrived, Fly.Cancelled, Fly.Displaced = false, false, false
 	local started = os.clock()
+	local targetFlat = Vector3.new(targetPos.X, 0, targetPos.Z)
 
-	-- ★ Heartbeat: trackedPos を進めて CFrame で固定
+	local stuckTimer, lastPos = 0, r.Position
+	local ragdollPaused, ragdollEndAt = false, 0
+	local lastAvoidAt = 0
+	local avoidTarget = targetPos
+
 	Fly.HeartbeatConn = RunService.Heartbeat:Connect(function(dt)
 		if not Fly.Active or Fly.Arrived or Fly.Cancelled or Fly.Displaced then return end
+
+		-- ラグドール: 一時停止して復帰を待つ
+		if isRagdolled() then
+			if not ragdollPaused then
+				ragdollPaused = true
+				ragdollEndAt = os.clock() + CFG.RagdollTimeout
+			end
+			if os.clock() > ragdollEndAt then
+				Fly.Displaced = true
+				return
+			end
+			local rpR = root()
+			if rpR then Fly.TrackedPos = rpR.Position end
+			return
+		elseif ragdollPaused then
+			ragdollPaused = false
+			local rpR = root()
+			if rpR then
+				Fly.TrackedPos = rpR.Position
+				lastPos = rpR.Position
+			end
+			stuckTimer = 0
+		end
+
 		if os.clock() - started > timeout then Fly.Displaced = true; return end
 		if checkFn and checkFn() then Fly.Cancelled = true; return end
-		if isRagdolled() then Fly.Displaced = true; return end
 
 		local rp = root()
 		if not rp or rp.Parent ~= c then Fly.Displaced = true; return end
 
-		local diff = Fly.Target - Fly.TrackedPos
+		-- 壁回避（0.5秒おきに再計算）
+		if os.clock() - lastAvoidAt > 0.5 then
+			lastAvoidAt = os.clock()
+			avoidTarget = avoid(rp.Position, targetPos)
+		end
+
+		local trackedFlat = Vector3.new(Fly.TrackedPos.X, 0, Fly.TrackedPos.Z)
+		local diff = Vector3.new(avoidTarget.X, 0, avoidTarget.Z) - trackedFlat
 		local dist = diff.Magnitude
-		local desiredSpeed = math.min(Fly.Speed, math.sqrt(2 * CFG.Decel * math.max(dist, 0)))
+		local desiredSpeed = math.min(Fly.Speed, math.sqrt(2 * CFG.Decel * dist))
 		local step = desiredSpeed * math.max(dt, 1/240)
 
-		-- ★ 予測到着: 越えるなら止める
+		local newFlat
 		if dist <= math.max(step, CFG.ArriveDist) then
-			Fly.TrackedPos = Fly.Target
-			Fly.Arrived = true
-		else
-			Fly.TrackedPos = Fly.TrackedPos + diff.Unit * step
-		end
-
-		-- ドリフト検知 → 再同期
-		if (rp.Position - Fly.TrackedPos).Magnitude > CFG.MaxDrift then
-			Fly.TrackedPos = rp.Position
-			if (Fly.Target - Fly.TrackedPos).Magnitude <= CFG.ArriveDist then
+			newFlat = Vector3.new(avoidTarget.X, 0, avoidTarget.Z)
+			-- 最終到着は元のターゲットとの水平距離で判定
+			local finalDist = Vector3.new(targetFlat.X - newFlat.X, 0, targetFlat.Z - newFlat.Z).Magnitude
+			if finalDist <= CFG.ArriveDist then
 				Fly.Arrived = true
-				return
 			end
+		else
+			newFlat = trackedFlat + diff.Unit * step
 		end
 
-		local look = Vector3.new(diff.X, 0, diff.Z)
-		local rot = look.Magnitude > 0.05 and CFrame.lookAt(Vector3.zero, look.Unit) or rp.CFrame.Rotation
+		-- 地面追従
+		local gY = groundY(newFlat.X, newFlat.Z, rp.Position.Y)
+		local newY = gY + CFG.GroundOffset
+		Fly.TrackedPos = Vector3.new(newFlat.X, newY, newFlat.Z)
+
+		-- ドリフト回復
+		local driftFlat = Vector3.new(rp.Position.X - Fly.TrackedPos.X, 0, rp.Position.Z - Fly.TrackedPos.Z)
+		if driftFlat.Magnitude > CFG.MaxDrift then
+			Fly.TrackedPos = Vector3.new(rp.Position.X, newY, rp.Position.Z)
+		end
+
+		-- スタック検知（壁にめり込んだ）
+		if (rp.Position - lastPos).Magnitude < 1 then
+			stuckTimer += dt
+			if stuckTimer > 0.5 then
+				pcall(function()
+					local hh = hum()
+					if hh then hh.Jump = true end
+				end)
+				stuckTimer = 0
+			end
+		else
+			stuckTimer = 0
+		end
+		lastPos = rp.Position
+
+		local look = diff.Magnitude > 0.05 and diff.Unit or Vector3.new(0, 0, 1)
+		local rot = CFrame.lookAt(Vector3.zero, look)
 		pcall(function()
 			rp.CFrame = CFrame.new(Fly.TrackedPos) * rot
 			rp.AssemblyLinearVelocity = Vector3.zero
@@ -777,21 +855,22 @@ local function flyTo(target, speed, checkFn, timeout)
 		end)
 	end)
 
-	-- ★ PreSimulation: サーバーに見せる速度
 	Fly.PreSimConn = RunService.PreSimulation:Connect(function(dt)
 		if not Fly.Active or Fly.Arrived or Fly.Cancelled or Fly.Displaced then return end
+		if ragdollPaused then return end
 		local rp = root()
 		if not rp or rp.Parent ~= c then return end
 
-		local diff = Fly.Target - Fly.TrackedPos
+		local rpFlat = Vector3.new(rp.Position.X, 0, rp.Position.Z)
+		local trackedFlat = Vector3.new(Fly.TrackedPos.X, 0, Fly.TrackedPos.Z)
+		local diff = trackedFlat - rpFlat
 		local dist = diff.Magnitude
-		local desiredSpeed = math.min(Fly.Speed, math.sqrt(2 * CFG.Decel * math.max(dist, 0)))
+		local desiredSpeed = math.min(Fly.Speed, math.sqrt(2 * CFG.Decel * (dist + 5)))
 		local velocity = Vector3.zero
 		if dist > 0.01 then velocity = diff.Unit * desiredSpeed end
-		velocity += Vector3.new(0, workspace.Gravity * dt * 0.5, 0)
 
 		pcall(function()
-			rp.AssemblyLinearVelocity = velocity
+			rp.AssemblyLinearVelocity = Vector3.new(velocity.X, 0, velocity.Z)
 			rp.AssemblyAngularVelocity = Vector3.zero
 		end)
 	end)
@@ -810,89 +889,47 @@ local function flyTo(target, speed, checkFn, timeout)
 end
 
 print("[ShouyuHub] Part 6/8 ready")-- ============================================================
--- Part 7/8: Actions (runToEgg / grab / runHome / stealAndDeliver / autoLoop)
--- 反省点: 到着即掴む / 取られたら即次へ / DropFieldEgg必須 / 3点帰還
+-- Part 7/8: Actions
+-- 核心: 一発到達 / 到着即掴む / DropFieldEgg必須 / 取られたら即次
 -- ============================================================
 
--- ★ 卵へ移動（flyTo + ラグドール/フィールド復帰 + 到着即掴む）
-local function runToEgg(uid, egg)
-	local started = os.clock()
-	local r = root()
-	if not r then return false, "no-root" end
-
-	local home = homePoint()
-	local needExit = insideBase(r.Position) and not insideBase(egg)
-
-	if needExit then
-		status("基地から脱出")
-		local ok, reason = flyTo(home + Vector3.new(0, 5, 0), CFG.SpeedToEgg, function()
-			return state.Cancel
-		end, 30)
-		if not ok and reason ~= "arrived" then return false, reason end
-		if state.Cancel then return false, "cancelled" end
-	end
-
-	local target = egg + Vector3.new(0, 3, 0)
-
-	for attempt = 1, CFG.MaxRetries do
-		if state.Cancel then return false, "cancelled" end
-
-		status("卵へ移動中" .. (attempt > 1 and (" (" .. attempt .. ")") or ""))
-		local ok, reason = flyTo(target, CFG.SpeedToEgg, function()
-			if state.Cancel then return true end
-			if heldByOther(uid) then status("他プレイヤーが取得"); return true end
-			if fieldLocked() then status(isNight() and "夜: 待機" or "壁UP: 待機"); return true end
-			if os.clock() - started > CFG.StealTimeLimit then return true end
-			return false
-		end, CFG.StealTimeLimit)
-
-		if ok then break end
-
-		if reason == "displaced" then
-			if isRagdolled() then
-				status("ラグドール復帰中...")
-				waitRagdollEnd(CFG.RagdollTimeout)
-			end
-			while fieldLocked() and not state.Cancel do
-				RunService.Heartbeat:Wait()
-			end
-			local eggNow = eggPosition(uid, true)
-			if not eggNow then
-				status("卵が消えた")
-				return false, "egg-gone"
-			end
-			target = eggNow + Vector3.new(0, 3, 0)
-		else
-			return false, reason
-		end
-		if attempt == CFG.MaxRetries then return false, "max-retries" end
-	end
-
-	-- ★ 到着 → 即掴む（プロンプト + モジュール同時 / 1秒リトライ）
+-- 掴み処理
+local function grabEggAt(uid, eggPos)
 	status("掴み中")
 	local rp = root()
 	if not rp then return false, "no-root" end
 
-	local prompt = promptNear(rp.Position, CFG.GrabRadius)
+	local prompt = promptNear(eggPos, CFG.GrabRadius)
 	if prompt and typeof(fireproximityprompt) == "function" then
 		pcall(function() prompt.HoldDuration = 0 end)
 		task.spawn(function() pcall(fireproximityprompt, prompt) end)
 	end
 	task.spawn(takeEgg, uid)
 
-	local waited = 0
-	local nextRetry = 0
+	local waited, nextRetry = 0, 0
 	while not (state.Carrying and state.Uid == uid) and waited < CFG.GrabRetrySec and not state.Cancel do
 		if waited >= nextRetry then
-			nextRetry = waited + 0.2
-			task.spawn(takeEgg, uid)
-			local p = promptNear(rp.Position, CFG.GrabRadius)
-			if p and typeof(fireproximityprompt) == "function" then
-				pcall(function()
-					p.HoldDuration = 0
-					fireproximityprompt(p)
-				end)
+			nextRetry = waited + 0.15
+			local eggNow = eggPosition(uid, true)
+			if not eggNow then break end
+			local rp2 = root()
+			if rp2 then
+				local flat = Vector3.new(eggNow.X - rp2.Position.X, 0, eggNow.Z - rp2.Position.Z)
+				if flat.Magnitude > 3 then
+					local v = flat.Unit * math.min(50, flat.Magnitude / 0.05)
+					pcall(function()
+						rp2.AssemblyLinearVelocity = Vector3.new(v.X, 0, v.Z)
+					end)
+				end
+				local p = promptNear(eggNow, CFG.GrabRadius)
+				if p and typeof(fireproximityprompt) == "function" then
+					pcall(function()
+						p.HoldDuration = 0
+						fireproximityprompt(p)
+					end)
+				end
 			end
+			task.spawn(takeEgg, uid)
 		end
 		waited += RunService.Heartbeat:Wait()
 	end
@@ -900,46 +937,91 @@ local function runToEgg(uid, egg)
 	return state.Carrying and state.Uid == uid, state.Carrying and "ok" or "grab-failed"
 end
 
--- ★ 帰還（3点ウェイポイント / 速度1000 / DropFieldEgg必須）
+-- ★ 卵へ移動（地面這い / 一発到達）
+local function runToEgg(uid, egg)
+	local started = os.clock()
+
+	if fieldLocked() then
+		status(isNight() and "夜: 待機" or "壁UP: 待機")
+		while fieldLocked() and not state.Cancel do RunService.Heartbeat:Wait() end
+	end
+
+	for attempt = 1, CFG.MaxRetries do
+		if state.Cancel then return false, "cancelled" end
+
+		local eggNow = eggPosition(uid, true)
+		if not eggNow then return false, "egg-gone" end
+		if heldByOther(uid) then return false, "stolen" end
+
+		status("卵へ移動中" .. (attempt > 1 and (" (" .. attempt .. ")") or ""))
+		local ok, reason = flyToGround(eggNow, CFG.SpeedToEgg, function()
+			if state.Cancel then return true end
+			if heldByOther(uid) then status("他プレイヤーが取得"); return true end
+			if os.clock() - started > CFG.StealTimeLimit then return true end
+			return false
+		end, CFG.StealTimeLimit)
+
+		if state.Cancel then return false, "cancelled" end
+
+		-- 水平距離で到着確認
+		local rp = root()
+		if rp then
+			local flat = Vector3.new(eggNow.X - rp.Position.X, 0, eggNow.Z - rp.Position.Z)
+			if flat.Magnitude <= CFG.ArriveDist + 3 then
+				return grabEggAt(uid, eggNow)
+			end
+		end
+
+		if reason == "cancelled" then
+			if heldByOther(uid) then return false, "stolen" end
+			return false, "cancelled"
+		end
+
+		if isRagdolled() then
+			status("ラグドール復帰中...")
+			waitRagdollEnd(CFG.RagdollTimeout)
+		end
+
+		while fieldLocked() and not state.Cancel do
+			status(isNight() and "夜: 待機" or "壁UP: 待機")
+			RunService.Heartbeat:Wait()
+		end
+
+		if attempt < CFG.MaxRetries and not state.Cancel then
+			task.wait(CFG.RetryGap)
+		end
+	end
+
+	return false, "max-retries"
+end
+
+-- ★ 帰還（地面這い / 直接家 / DropFieldEgg必須）
 local function runHome(deliveryStartAt)
 	local r = root()
 	if not r then return false end
 	local home = homePoint()
-	local maxY = math.max(r.Position.Y, home.Y) + CFG.Height
 	local speed = carrySpeed(CFG.SpeedHome)
 
 	local function carryStop()
-		return state.Delivered >= deliveryStartAt
-			or state.Cancel
-			or not state.Carrying
+		return state.Delivered >= deliveryStartAt or state.Cancel or not state.Carrying
 	end
 
-	-- ① 上昇
-	status("帰還: 上昇")
-	flyTo(Vector3.new(r.Position.X, maxY, r.Position.Z), speed, carryStop, CFG.HomeTimeLimit)
-
-	-- ② 水平
-	if not carryStop() then
-		status("帰還: 横移動")
-		flyTo(Vector3.new(home.X, maxY, home.Z), speed, carryStop, CFG.HomeTimeLimit)
+	while fieldLocked() and not state.Cancel and state.Carrying do
+		status(isNight() and "夜: 壁待機" or "壁UP: 待機")
+		RunService.Heartbeat:Wait()
 	end
 
-	-- ③ 降下
-	if not carryStop() then
-		status("帰還: 降下")
-		flyTo(home, speed, carryStop, CFG.HomeTimeLimit)
-	end
+	status("帰還中")
+	flyToGround(home, speed, carryStop, CFG.HomeTimeLimit)
 
-	-- ④ settle
+	-- settle
 	status("着地")
 	local settle = 0
-	while settle < 2 and state.Carrying
-		and state.Delivered < deliveryStartAt
-		and not state.Cancel do
+	while settle < 2 and state.Carrying and state.Delivered < deliveryStartAt and not state.Cancel do
 		settle += RunService.Heartbeat:Wait()
 	end
 
-	-- ⑤ drop（★必須）
+	-- ★ drop（必須）
 	if state.Carrying and state.Delivered < deliveryStartAt and not state.Cancel then
 		status("納品中")
 		local h = hum()
@@ -951,28 +1033,8 @@ local function runHome(deliveryStartAt)
 			end)
 		end
 		task.wait(0.25)
+		dropEgg()
 
-		local ok = pcall(function()
-			if type(EggState) == "table"
-				and type(EggState.DropFieldEgg) == "function" then
-				EggState.DropFieldEgg("PlayerRequest")
-				state.SentDropAt = os.clock()
-			else
-				error("DropFieldEgg not available")
-			end
-		end)
-
-		if not ok then
-			local re = remote("RE/EggWorld/RequestDrop")
-			if re and re:IsA("RemoteEvent") then
-				pcall(function()
-					re:FireServer("PlayerRequest")
-					state.SentDropAt = os.clock()
-				end)
-			end
-		end
-
-		-- ⑥ 確認
 		local waited = 0
 		while state.Delivered < deliveryStartAt and waited < 1.5 do
 			waited += RunService.Heartbeat:Wait()
@@ -982,7 +1044,7 @@ local function runHome(deliveryStartAt)
 	return state.Delivered >= deliveryStartAt
 end
 
--- ★ 単発スティール（リトライ + DropFieldEgg再試行）
+-- ★ 単発スティール
 local function stealAndDeliver(uid, retry)
 	if state.Busy then return false end
 	state.Busy = true
@@ -997,12 +1059,8 @@ local function stealAndDeliver(uid, retry)
 		local ok, err = pcall(function()
 			status("卵を探し中...")
 			local egg = eggPosition(uid, true)
-			if not egg then
-				status("卵はもう無い")
-				return
-			end
+			if not egg then status("卵はもう無い"); return end
 
-			-- 別の卵を既に持っていたら落とす
 			if state.Carrying and state.Uid ~= uid then
 				dropEgg()
 				local waited = 0
@@ -1014,8 +1072,7 @@ local function stealAndDeliver(uid, retry)
 			local reachOk, reason = runToEgg(uid, egg)
 			if not reachOk then
 				status("到達失敗: " .. tostring(reason))
-				if reason == "egg-gone" or reason == "grab-failed" then
-					-- 取られた → 即座に上位へ返す
+				if reason == "egg-gone" or reason == "stolen" or reason == "grab-failed" then
 					state.Busy = false
 					return
 				end
@@ -1025,7 +1082,7 @@ local function stealAndDeliver(uid, retry)
 			status("帰還中")
 			local delivered = runHome(deliveryStartAt)
 
-			-- ★ DropFieldEgg 再試行（反省点）
+			-- ★ DropFieldEgg 再試行
 			if not delivered and state.Carrying and not state.Cancel then
 				status("ドロップ再試行")
 				for i = 1, 3 do
@@ -1037,13 +1094,7 @@ local function stealAndDeliver(uid, retry)
 						end)
 					end
 					task.wait(0.3)
-					pcall(function()
-						if type(EggState) == "table"
-							and type(EggState.DropFieldEgg) == "function" then
-							EggState.DropFieldEgg("PlayerRequest")
-							state.SentDropAt = os.clock()
-						end
-					end)
+					dropEgg()
 					local w = 0
 					while state.Delivered < deliveryStartAt and w < 1 do
 						w += RunService.Heartbeat:Wait()
@@ -1073,7 +1124,7 @@ local function stealAndDeliver(uid, retry)
 	return succeeded
 end
 
--- ★ ベスト卵選択（blocked + 競合回避）
+-- ★ ベスト卵選択
 local autoFilter = { MinRarity = 0, MinValue = 0 }
 local blocked = {}
 
@@ -1083,9 +1134,7 @@ local function enemiesNear(position, radius)
 		if plr ~= localPlayer then
 			local c = plr.Character
 			local rp = c and c:FindFirstChild("HumanoidRootPart")
-			if rp and (rp.Position - position).Magnitude <= radius then
-				return true
-			end
+			if rp and (rp.Position - position).Magnitude <= radius then return true end
 		end
 	end
 	return false
@@ -1104,14 +1153,9 @@ local function pickBest()
 				if autoFilter.MinRarity > 0 and info.Rarity < autoFilter.MinRarity then pass = false end
 				if autoFilter.MinValue > 0 and info.Value < autoFilter.MinValue then pass = false end
 				if pass then
-					-- 競合相手が近い卵は優先度半減
 					local value = info.Value
-					if enemiesNear(record.BottomCFrame.Position, 40) then
-						value = value * 0.5
-					end
-					if value > bestVal then
-						best, bestVal = record, value
-					end
+					if enemiesNear(record.BottomCFrame.Position, 40) then value = value * 0.5 end
+					if value > bestVal then best, bestVal = record, value end
 				end
 			end
 		end
@@ -1119,7 +1163,7 @@ local function pickBest()
 	return best
 end
 
--- ★ 自動ループ（即次へ）
+-- ★ 自動ループ
 local autoLoop = { Active = false, Thread = nil }
 local function startAutoLoop()
 	if autoLoop.Active then return end
@@ -1129,9 +1173,7 @@ local function startAutoLoop()
 			if not state.Busy then
 				if fieldLocked() then
 					status(isNight() and "夜: 待機" or "壁UP: 待機")
-					while fieldLocked() and autoLoop.Active do
-						RunService.Heartbeat:Wait()
-					end
+					while fieldLocked() and autoLoop.Active do RunService.Heartbeat:Wait() end
 				else
 					local best = pickBest()
 					if best then
@@ -1159,8 +1201,7 @@ local function stopAutoLoop()
 end
 
 print("[ShouyuHub] Part 7/8 ready")-- ============================================================
--- Part 8/8: UI (Compact) + Diff Update + Init
--- 反省点: 小型化 / 差分更新 / status反映 / ボタン状態同期
+-- Part 8/8: UI + Init
 -- ============================================================
 print("[ShouyuHub] UI 構築開始")
 
@@ -1207,7 +1248,6 @@ bgG.Color = ColorSequence.new({
 	ColorSequenceKeypoint.new(1, Color3.fromRGB(5, 10, 15)),
 })
 
--- ヘッダー
 local header = Instance.new("Frame", main)
 header.Size = UDim2.new(1, -16, 0, 52)
 header.Position = UDim2.fromOffset(8, 8)
@@ -1287,7 +1327,6 @@ closeBtn.TextSize = 18
 closeBtn.ZIndex = 6
 Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 8)
 
--- ボディ
 local body = Instance.new("Frame", main)
 body.Size = UDim2.new(1, -16, 1, -68)
 body.Position = UDim2.fromOffset(8, 68)
@@ -1417,7 +1456,6 @@ local function updateRow(row, info)
 	end
 end
 
--- ★ 差分リビルド（反省点: ちらつかない）
 local function rebuild()
 	local infos = {}
 	local ok, records = pcall(snapshot)
@@ -1448,7 +1486,6 @@ local function rebuild()
 	setSelected(selectedUid and rows[selectedUid] and selectedUid or nil)
 end
 
--- ボタン
 local function mkBtn(text, pos, size, color)
 	local b = Instance.new("TextButton", body)
 	b.Size = size
@@ -1489,10 +1526,7 @@ autoBtn.MouseButton1Click:Connect(function()
 end)
 
 refreshBtn.MouseButton1Click:Connect(function()
-	if not state.Busy then
-		rebuild()
-		status("更新完了")
-	end
+	if not state.Busy then rebuild(); status("更新完了") end
 end)
 
 instantBtn.MouseButton1Click:Connect(function()
@@ -1502,9 +1536,7 @@ instantBtn.MouseButton1Click:Connect(function()
 		return
 	end
 	if selectedUid then
-		task.spawn(function()
-			stealAndDeliver(selectedUid, false)
-		end)
+		task.spawn(function() stealAndDeliver(selectedUid, false) end)
 	else
 		status("卵を選んでください")
 	end
@@ -1539,7 +1571,6 @@ closeBtn.MouseButton1Click:Connect(function()
 	gui:Destroy()
 end)
 
--- ドラッグ
 local drag, dragStart, startPos = false, nil, nil
 header.InputBegan:Connect(function(input)
 	if input.UserInputType == Enum.UserInputType.MouseButton1
@@ -1564,7 +1595,6 @@ UserInputService.InputChanged:Connect(function(input)
 		startPos.Y.Scale, startPos.Y.Offset + d.Y)
 end)
 
--- 自動リフレッシュ（差分なのでちらつかない）
 task.spawn(function()
 	while gui.Parent do
 		task.wait(CFG.AutoRefresh)
@@ -1572,7 +1602,6 @@ task.spawn(function()
 	end
 end)
 
--- ボタン状態同期
 task.spawn(function()
 	while gui.Parent do
 		task.wait(0.2)
@@ -1586,7 +1615,6 @@ task.spawn(function()
 	end
 end)
 
--- 初回描画
 task.spawn(function()
 	task.wait(0.3)
 	pcall(rebuild)
