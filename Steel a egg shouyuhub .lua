@@ -1,5 +1,5 @@
 -- ============================================================
--- ShouyuHub | Safe Hop Auto Steal (Full UI)
+-- ShouyuHub | Safe Hop Auto Steal (Original UI)
 -- Part 1/8: Config / Dependencies
 -- ============================================================
 local Players           = game:GetService("Players")
@@ -10,22 +10,14 @@ local TweenService      = game:GetService("TweenService")
 local localPlayer       = Players.LocalPlayer
 
 local CFG = {
-	-- ホップ移動設定（検証済みの安全な値）
 	HopStep = 60,       -- 1回のワープ距離 (スタッズ)
 	HopDelay = 0.3,     -- ワープ間の待機時間 (秒)
-	
-	-- 掴み設定
 	GrabRadius = 15,
 	GrabRetrySec = 1.5,
-	
-	-- タイムアウト
 	StealTimeLimit = 120,
 	HomeTimeLimit = 45,
-	
-	-- リトライ
 	MaxRetries = 3,
 	BlockedSec = 30,
-	
 	SnapshotTTL = 0.5,
 	AutoRefresh = 3,
 }
@@ -41,7 +33,6 @@ local THEME = {
 	TextDim    = Color3.fromRGB(160, 190, 210),
 	Stroke     = Color3.fromRGB(60, 100, 130),
 	Danger     = Color3.fromRGB(255, 90, 90),
-	Good       = Color3.fromRGB(90, 240, 140),
 }
 
 local function safeRequire(getter)
@@ -62,14 +53,7 @@ local statusLabel = nil
 local function status(text) if statusLabel then statusLabel.Text = tostring(text) end end-- ============================================================
 -- Part 2/8: State + Events
 -- ============================================================
-local state = {
-	Carrying      = false,
-	Uid           = nil,
-	Busy          = false,
-	Cancel        = false,
-	Delivered     = 0,
-	SentDropAt    = 0,
-}
+local state = { Carrying = false, Uid = nil, Busy = false, Cancel = false, Delivered = 0, SentDropAt = 0 }
 
 if type(EggState) == "table" and type(EggState.CarryChanged) == "table" then
 	EggState.CarryChanged:Connect(function(arg)
@@ -83,9 +67,7 @@ end
 pcall(function()
 	local re = remote("RE/EggWorld/FieldEggRedeemVerdict")
 	if re and re:IsA("RemoteEvent") then
-		re.OnClientEvent:Connect(function()
-			state.Delivered = os.clock()
-		end)
+		re.OnClientEvent:Connect(function() state.Delivered = os.clock() end)
 	end
 end)
 
@@ -101,7 +83,7 @@ local function dropEgg()
 		pcall(EggState.DropFieldEgg, "PlayerRequest")
 	end
 	end-- ============================================================
--- Part 3/8: Snapshot + Egg Info
+-- Part 3/8: Helpers
 -- ============================================================
 local function money(value)
 	value = tonumber(value) or 0
@@ -128,9 +110,7 @@ end
 local snapshotCache = { At = 0, List = {} }
 local function snapshot(force)
 	local now = os.clock()
-	if not force and (now - snapshotCache.At) < CFG.SnapshotTTL then
-		return snapshotCache.List
-	end
+	if not force and (now - snapshotCache.At) < CFG.SnapshotTTL then return snapshotCache.List end
 	local list = {}
 	local re = remote("RF/EggWorld/AskFieldEggSnapshot")
 	if re and re:IsA("RemoteFunction") then
@@ -151,31 +131,15 @@ local function snapshot(force)
 	return list
 end
 
-local function eggPosition(uid, force)
-	for _, record in ipairs(snapshot(force)) do
-		if record.Uid == uid then return record.BottomCFrame.Position end
-	end
-	return nil
-end
-
 local function describe(record)
 	local directory = type(Assets) == "table" and Assets.Directory or nil
 	local entry = type(directory) == "table" and directory[tostring(record.AssetCategory)] or nil
-	local info = {
-		Uid = record.Uid, Category = tostring(record.AssetCategory),
-		Name = tostring(record.AssetCategory), Icon = "",
-		Rarity = 0, Value = 0,
-	}
+	local info = { Uid = record.Uid, Name = tostring(record.AssetCategory), Icon = "", Rarity = 0, Value = 0 }
 	if type(entry) == "table" then
 		info.Name = tostring(entry.DisplayName or record.AssetCategory)
 		local icon = entry.Icon
-		if icon ~= nil and tostring(icon) ~= "" then
-			icon = tostring(icon)
-			info.Icon = tonumber(icon) and ("rbxassetid://" .. icon) or icon
-		end
-		if type(entry.Rarity) == "table" then
-			info.Rarity = tonumber(entry.Rarity.RarityNumber or entry.Rarity.Rank) or 0
-		end
+		if icon ~= nil and tostring(icon) ~= "" then info.Icon = tonumber(icon) and ("rbxassetid://" .. icon) or tostring(icon) end
+		if type(entry.Rarity) == "table" then info.Rarity = tonumber(entry.Rarity.RarityNumber or entry.Rarity.Rank) or 0 end
 		local scale = tonumber(record.AssetScale) or 1
 		local factor = scale > 5 and (scale / 5) ^ 1.2 * 19.637875755794113 or scale ^ 1.85
 		local mutation = 1
@@ -186,64 +150,6 @@ local function describe(record)
 		info.Value = (tonumber(entry.EarningRate) or 0) * factor * mutation
 	end
 	return info
-		end-- ============================================================
--- Part 4/8: Safe Hop Engine (60 studs / 0.3 sec)
--- ============================================================
-local function hopTo(targetPos, checkFn)
-	local r = root()
-	if not r then return false end
-	
-	local step = CFG.HopStep
-	local delay = CFG.HopDelay
-	
-	-- アンチチート対策：カメラ固定
-	local cam = workspace.CurrentCamera
-	local oldType = cam.CameraType
-	pcall(function() cam.CameraType = Enum.CameraType.Scriptable; cam.CFrame = cam.CFrame end)
-
-	while not state.Cancel do
-		if checkFn and checkFn() then break end
-		
-		r = root()
-		if not r then break end
-		
-		local currentPos = r.Position
-		local flat = Vector3.new(targetPos.X - currentPos.X, 0, targetPos.Z - currentPos.Z)
-		
-		-- 目的地に十分近づいたら終了
-		if flat.Magnitude <= step then
-			pcall(function()
-				r.CFrame = CFrame.new(targetPos + Vector3.new(0, 3, 0))
-				r.AssemblyLinearVelocity = Vector3.zero
-			end)
-			break
-		end
-		
-		-- 次のワープ先を計算 (60スタッズ先)
-		local dir = flat.Unit
-		local nextPos = currentPos + dir * step + Vector3.new(0, 3, 0)
-		
-		-- ワープ実行
-		pcall(function()
-			r.CFrame = CFrame.new(nextPos) * r.CFrame.Rotation
-			r.AssemblyLinearVelocity = Vector3.zero
-			r.AssemblyAngularVelocity = Vector3.zero
-		end)
-		
-		-- 0.3秒待機（これがアンチチートを欺く鍵）
-		task.wait(delay)
-		
-		-- サーバーに引き戻されたかチェック
-		local check = root()
-		if check and (check.Position - nextPos).Magnitude > 20 then
-			-- 引き戻されたら少し長めに待ってリトライ
-			task.wait(0.2)
-		end
-	end
-	
-	-- カメラを戻す
-	pcall(function() cam.CameraType = oldType end)
-	return true
 end
 
 local function promptNear(pos, rad)
@@ -257,99 +163,100 @@ local function promptNear(pos, rad)
 		end
 	end
 	return best
+		end-- ============================================================
+-- Part 4/8: Hop Engine (60 studs / 0.3 sec)
+-- ============================================================
+local function hopTo(targetPos, checkFn)
+	local r = root()
+	if not r then return false end
+	
+	-- カメラ固定
+	local cam = workspace.CurrentCamera
+	local oldType = cam.CameraType
+	pcall(function() cam.CameraType = Enum.CameraType.Scriptable; cam.CFrame = cam.CFrame end)
+
+	while not state.Cancel do
+		if checkFn and checkFn() then break end
+		r = root()
+		if not r then break end
+		
+		local flat = Vector3.new(targetPos.X - r.Position.X, 0, targetPos.Z - r.Position.Z)
+		if flat.Magnitude <= CFG.HopStep then
+			pcall(function() r.CFrame = CFrame.new(targetPos + Vector3.new(0, 3, 0)); r.AssemblyLinearVelocity = Vector3.zero end)
+			break
+		end
+		
+		local nextPos = r.Position + flat.Unit * CFG.HopStep + Vector3.new(0, 3, 0)
+		pcall(function() r.CFrame = CFrame.new(nextPos); r.AssemblyLinearVelocity = Vector3.zero end)
+		
+		task.wait(CFG.HopDelay)
+		
+		-- 引き戻し検知
+		local check = root()
+		if check and (check.Position - nextPos).Magnitude > 20 then task.wait(0.2) end
+	end
+	
+	pcall(function() cam.CameraType = oldType end)
+	return true
 end
 
 local function grabEgg(uid, pos)
 	status("掴み中")
-	
-	-- 卵の真上にワープ
 	local r = root()
 	if r and pos then
-		pcall(function()
-			r.CFrame = CFrame.new(pos + Vector3.new(0, 3, 0))
-			r.AssemblyLinearVelocity = Vector3.zero
-		end)
+		pcall(function() r.CFrame = CFrame.new(pos + Vector3.new(0, 3, 0)); r.AssemblyLinearVelocity = Vector3.zero end)
 		task.wait(0.1)
 	end
 	
-	-- プロンプトとモジュールを同時に叩く
 	local prompt = promptNear(pos, CFG.GrabRadius)
-	if prompt and typeof(fireproximityprompt) == "function" then
-		pcall(function() prompt.HoldDuration = 0 end)
-		task.spawn(function() pcall(fireproximityprompt, prompt) end)
-	end
+	if prompt then pcall(function() prompt.HoldDuration = 0; fireproximityprompt(prompt) end) end
 	task.spawn(takeEgg, uid)
 	
-	-- 掴めるまで待機
 	local waited = 0
 	while not (state.Carrying and state.Uid == uid) and waited < CFG.GrabRetrySec and not state.Cancel do
 		if math.floor(waited * 10) % 2 == 0 then
 			local p = promptNear(pos, CFG.GrabRadius)
-			if p and typeof(fireproximityprompt) == "function" then
-				pcall(function() p.HoldDuration = 0; fireproximityprompt(p) end)
-			end
+			if p then pcall(function() p.HoldDuration = 0; fireproximityprompt(p) end) end
 			task.spawn(takeEgg, uid)
 		end
 		waited += RunService.Heartbeat:Wait()
 	end
-	
 	return state.Carrying and state.Uid == uid
 			end-- ============================================================
--- Part 5/8: Steal Actions
+-- Part 5/8: Steal Logic
 -- ============================================================
 local function stealAndDeliver(uid, retry)
 	if state.Busy then return false end
 	state.Busy = true
 	state.Cancel = false
-	
 	local attempts = retry and CFG.MaxRetries or 1
 	local succeeded = false
 	
 	for attempt = 1, attempts do
 		if state.Cancel then break end
-		
 		local started = os.clock()
-		local eggPos = eggPosition(uid, true)
+		local eggPos = nil
+		for _, r in ipairs(snapshot(true)) do if r.Uid == uid then eggPos = r.BottomCFrame.Position break end end
 		
-		if not eggPos then
-			status("卵が見つかりません")
-			break
-		end
+		if not eggPos then status("卵が見つかりません"); break end
 		
 		status("卵へ移動中" .. (attempt > 1 and (" (" .. attempt .. ")") or ""))
-		-- 行きも 60スタッズ / 0.3秒 のホップ
 		hopTo(eggPos, function() return state.Cancel end)
 		
 		if grabEgg(uid, eggPos) then
 			status("帰還中...")
-			local home = homePoint()
-			
-			-- 帰りも 60スタッズ / 0.3秒 のホップ
-			hopTo(home, function() return state.Delivered >= started or not state.Carrying end)
-			
+			hopTo(homePoint(), function() return state.Delivered >= started or not state.Carrying end)
 			status("納品中...")
 			task.wait(0.5)
 			dropEgg()
-			
 			local waited = 0
-			while state.Delivered < started and waited < 2 and not state.Cancel do
-				waited += RunService.Heartbeat:Wait()
-			end
-			
-			if state.Delivered >= started then
-				succeeded = true
-				status("納品完了")
-				break
-			end
+			while state.Delivered < started and waited < 2 and not state.Cancel do waited += RunService.Heartbeat:Wait() end
+			if state.Delivered >= started then succeeded = true; status("納品完了"); break end
 		else
 			status("掴めませんでした")
 		end
-		
-		if attempt < attempts and not state.Cancel then
-			task.wait(1)
-		end
+		if attempt < attempts and not state.Cancel then task.wait(1) end
 	end
-	
 	state.Busy = false
 	return succeeded
 end
@@ -398,12 +305,10 @@ local function stopAutoLoop()
 	autoLoop.Active = false
 	if autoLoop.Thread then pcall(task.cancel, autoLoop.Thread); autoLoop.Thread = nil end
 				end-- ============================================================
--- Part 6/8: UI Construction
+-- Part 6/8: UI Construction (ShouyuHub)
 -- ============================================================
 print("[ShouyuHub] UI 構築開始")
-
 local UI_W, UI_H, UI_H_MIN = 300, 440, 64
-
 local gui = Instance.new("ScreenGui")
 gui.Name = "ShouyuHub_LightBlue"
 gui.ResetOnSpawn = false
@@ -420,7 +325,6 @@ main.BackgroundColor3 = THEME.Bg
 main.BorderSizePixel = 0
 main.Active = true
 main.ClipsDescendants = true
-
 local us = Instance.new("UIScale", main)
 us.Scale = 0.9
 Instance.new("UICorner", main).CornerRadius = UDim.new(0, 14)
@@ -521,21 +425,16 @@ list.CanvasSize = UDim2.new()
 list.AutomaticCanvasSize = Enum.AutomaticSize.Y
 list.ZIndex = 5
 Instance.new("UICorner", list).CornerRadius = UDim.new(0, 10)
-
 local lLayout = Instance.new("UIListLayout", list)
 lLayout.Padding = UDim.new(0, 4)
 lLayout.SortOrder = Enum.SortOrder.LayoutOrder
-
 local RARITY_COLORS = {
 	Color3.fromRGB(190, 190, 190), Color3.fromRGB(110, 210, 110),
 	Color3.fromRGB(90, 160, 255), Color3.fromRGB(190, 110, 255),
 	Color3.fromRGB(255, 170, 50), Color3.fromRGB(255, 80, 80),
 	Color3.fromRGB(255, 90, 200), Color3.fromRGB(80, 235, 235),
 }
-local function rarityColor(n)
-	return RARITY_COLORS[math.clamp(tonumber(n) or 1, 1, #RARITY_COLORS)] or THEME.Text
-end
-
+local function rarityColor(n) return RARITY_COLORS[math.clamp(tonumber(n) or 1, 1, #RARITY_COLORS)] or THEME.Text end
 local selectedUid = nil
 local rows = {}-- ============================================================
 -- Part 7/8: UI Logic
@@ -560,19 +459,16 @@ local function createRow(info)
 	frame.AutoButtonColor = true
 	frame.LayoutOrder = info.Rarity or 0
 	Instance.new("UICorner", frame).CornerRadius = UDim.new(0, 8)
-
 	local fS = Instance.new("UIStroke", frame)
 	fS.Color = THEME.Stroke
 	fS.Thickness = 1
 	fS.Transparency = 0.6
-
 	local icon = Instance.new("ImageLabel", frame)
 	icon.Size = UDim2.fromOffset(34, 34)
 	icon.Position = UDim2.fromOffset(4, 5)
 	icon.BackgroundTransparency = 1
 	icon.Image = ""
 	icon.ScaleType = Enum.ScaleType.Fit
-
 	local name = Instance.new("TextLabel", frame)
 	name.Size = UDim2.new(1, -46, 0, 20)
 	name.Position = UDim2.fromOffset(44, 3)
@@ -583,7 +479,6 @@ local function createRow(info)
 	name.TextSize = 13
 	name.TextXAlignment = Enum.TextXAlignment.Left
 	name.TextTruncate = Enum.TextTruncate.AtEnd
-
 	local value = Instance.new("TextLabel", frame)
 	value.Size = UDim2.new(1, -46, 0, 16)
 	value.Position = UDim2.fromOffset(44, 23)
@@ -593,14 +488,11 @@ local function createRow(info)
 	value.Font = Enum.Font.GothamMedium
 	value.TextSize = 12
 	value.TextXAlignment = Enum.TextXAlignment.Left
-
 	local row = { Frame = frame, Stroke = fS, Icon = icon, Name = name, Value = value }
-
 	frame.MouseButton1Click:Connect(function()
 		setSelected(info.Uid)
 		status("選択中: " .. tostring(name.Text))
 	end)
-
 	rows[info.Uid] = row
 	return row
 end
@@ -611,9 +503,7 @@ local function updateRow(row, info)
 	if row.Name.TextColor3 ~= c then row.Name.TextColor3 = c end
 	local moneyStr = money(info.Value)
 	if row.Value.Text ~= moneyStr then row.Value.Text = moneyStr end
-	if info.Icon ~= "" and row.Icon.Image ~= info.Icon then
-		row.Icon.Image = info.Icon
-	end
+	if info.Icon ~= "" and row.Icon.Image ~= info.Icon then row.Icon.Image = info.Icon end
 end
 
 local function rebuild()
@@ -626,7 +516,6 @@ local function rebuild()
 		end
 	end
 	table.sort(infos, function(a, b) return (a.Value or 0) > (b.Value or 0) end)
-
 	local seen = {}
 	for i, info in ipairs(infos) do
 		seen[info.Uid] = true
@@ -635,14 +524,9 @@ local function rebuild()
 		updateRow(row, info)
 		if row.Frame.LayoutOrder ~= i then row.Frame.LayoutOrder = i end
 	end
-
 	for uid, row in pairs(rows) do
-		if not seen[uid] then
-			row.Frame:Destroy()
-			rows[uid] = nil
-		end
+		if not seen[uid] then row.Frame:Destroy(); rows[uid] = nil end
 	end
-
 	setSelected(selectedUid and rows[selectedUid] and selectedUid or nil)
 end
 
@@ -695,11 +579,8 @@ instantBtn.MouseButton1Click:Connect(function()
 		status("キャンセル中...")
 		return
 	end
-	if selectedUid then
-		task.spawn(function() stealAndDeliver(selectedUid, false) end)
-	else
-		status("卵を選んでください")
-	end
+	if selectedUid then task.spawn(function() stealAndDeliver(selectedUid, false) end)
+	else status("卵を選んでください") end
 end)
 
 local valueSteps = { 0, 5e6, 5e7, 5e8, 5e9 }
@@ -732,26 +613,18 @@ end)
 
 local drag, dragStart, startPos = false, nil, nil
 header.InputBegan:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1
-		or input.UserInputType == Enum.UserInputType.Touch then
-		drag = true
-		dragStart = input.Position
-		startPos = main.Position
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		drag = true; dragStart = input.Position; startPos = main.Position
 	end
 end)
 header.InputEnded:Connect(function(input)
-	if input.UserInputType == Enum.UserInputType.MouseButton1
-		or input.UserInputType == Enum.UserInputType.Touch then
-		drag = false
-	end
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then drag = false end
 end)
 UserInputService.InputChanged:Connect(function(input)
 	if not drag then return end
-	if input.UserInputType ~= Enum.UserInputType.MouseMovement
-		and input.UserInputType ~= Enum.UserInputType.Touch then return end
+	if input.UserInputType ~= Enum.UserInputType.MouseMovement and input.UserInputType ~= Enum.UserInputType.Touch then return end
 	local d = input.Position - dragStart
-	main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X,
-		startPos.Y.Scale, startPos.Y.Offset + d.Y)
+	main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
 end)-- ============================================================
 -- Part 8/8: Init
 -- ============================================================
@@ -781,4 +654,4 @@ task.spawn(function()
 	status("待機中")
 end)
 
-print("[ShouyuHub] 起動完了 (8/8)")
+print("[ShouyuHub] 起動完了")
