@@ -1,5 +1,5 @@
 -- ============================================================
--- ShouyuHub x yslemEgg | Auto Steal (Hybrid)
+-- ShouyuHub x yslemEgg | Auto Steal (Hybrid) [Speed 4500 Optimized]
 -- Part 1/8: Header / Config / Dependencies
 -- ============================================================
 local Players           = game:GetService("Players")
@@ -11,14 +11,14 @@ local CoreGui           = game:GetService("CoreGui")
 local localPlayer       = Players.LocalPlayer
 
 local CFG = {
-	-- 移動
-	SpeedToEgg      = 2500,    -- 行きの最大速度
+	-- 移動 (4500対応)
+	SpeedToEgg      = 4500,    -- 行きの最大速度を4500へ
 	SpeedHome       = 1000,    -- 帰りの滑空速度
-	ArriveDist      = 6,       -- 到着判定の水平距離
-	Decel           = 60000,   -- 減速度（2500でも通り過ぎない）
+	ArriveDist      = 8,       -- 4500の速度に合わせた到着判定距離
+	Decel           = 120000,  -- 4500でも通り過ぎないための強烈な減速度
 
 	-- 掴み
-	GrabRadius      = 10,
+	GrabRadius      = 12,      -- 判定を少し広く確保
 	GrabRetrySec    = 1.2,
 
 	-- タイムアウト
@@ -88,7 +88,8 @@ local function status(text)
 	if statusLabel then statusLabel.Text = tostring(text) end
 end
 
-print("[ShouyuHub] Part 1/8 ready")-- ============================================================
+print("[ShouyuHub] Part 1/8 ready")
+-- ============================================================
 -- Part 2/8: Shield
 -- ============================================================
 local shield = { Original = nil, Clone = nil, Links = {}, Connection = nil, Added = nil }
@@ -248,7 +249,8 @@ local function walkSpeed()
 	return speed
 end
 
-print("[ShouyuHub] Part 2/8 ready")-- ============================================================
+print("[ShouyuHub] Part 2/8 ready")
+-- ============================================================
 -- Part 3/8: State + Events + Base Functions
 -- ============================================================
 local state = {
@@ -261,7 +263,7 @@ local state = {
 	Busy          = false,
 	Cancel        = false,
 	SentDropAt    = 0,
-	PulledAt      = 0, -- yslemEggのRelocate検知用
+	PulledAt      = 0,
 }
 
 if type(EggState) == "table" and type(EggState.CarryChanged) == "table"
@@ -280,7 +282,6 @@ if type(EggState) == "table" and type(EggState.CarryChanged) == "table"
 	end)
 end
 
--- 納品検知
 pcall(function()
 	local re = remote("RE/EggWorld/FieldEggRedeemVerdict")
 	if not re or not re:IsA("RemoteEvent") then return end
@@ -301,7 +302,6 @@ pcall(function()
 	end)
 end)
 
--- Relocate検知 (yslemEggの核)
 pcall(function()
 	local re = remote("RE/RigSync/Refresh")
 	if re and re:IsA("RemoteEvent") then
@@ -351,30 +351,6 @@ local function heldByMe(uid)
 	return false
 end
 
-local function heldByOther(uid)
-	if type(uid) ~= "string" then return false end
-	local egg = workspace:FindFirstChild(uid)
-	if not egg then return false end
-	local myChar = localPlayer.Character
-	for _, d in ipairs(egg:GetDescendants()) do
-		if d:IsA("WeldConstraint") or d:IsA("JointInstance") then
-			local ok, a, b = pcall(function() return d.Part0, d.Part1 end)
-			if ok then
-				for _, p in ipairs({ a, b }) do
-					if p then
-						local model = p:FindFirstAncestorOfClass("Model")
-						if model and model ~= myChar then
-							local plr = Players:GetPlayerFromCharacter(model)
-							if plr and plr ~= localPlayer then return true end
-						end
-					end
-				end
-			end
-		end
-	end
-	return false
-end
-
 task.spawn(function()
 	while true do
 		task.wait(0.2)
@@ -390,7 +366,8 @@ task.spawn(function()
 	end
 end)
 
-print("[ShouyuHub] Part 3/8 ready")-- ============================================================
+print("[ShouyuHub] Part 3/8 ready")
+-- ============================================================
 -- Part 4/8: Navigation + Snapshot + Avoidance
 -- ============================================================
 local function money(value)
@@ -484,7 +461,6 @@ local function describe(record)
 	return info
 end
 
--- 危険地帯回避
 local dangerCache, dangerAt = {}, 0
 local function dangers()
 	if os.clock() - dangerAt < 1 then return dangerCache end
@@ -521,13 +497,6 @@ local function dangers()
 			else add(child) end
 		end
 	end
-	local world = workspace:FindFirstChild("World")
-	local build = world and world:FindFirstChild("Build")
-	if build then
-		for _, child in ipairs(build:GetChildren()) do
-			if bad(child.Name) then for _, inner in ipairs(child:GetChildren()) do add(inner) end end
-		end
-	end
 	dangerCache = list
 	return list
 end
@@ -562,7 +531,8 @@ local function avoid(from, to)
 	return to
 end
 
-print("[ShouyuHub] Part 4/8 ready")-- ============================================================
+print("[ShouyuHub] Part 4/8 ready")
+-- ============================================================
 -- Part 5/8: Field State + Ragdoll + Helpers
 -- ============================================================
 local function isNight()
@@ -634,8 +604,9 @@ local function place(position)
 	end)
 end
 
-print("[ShouyuHub] Part 5/8 ready")-- ============================================================
--- Part 6/8: Movement Logic (2500 Ground Run + Instant TP)
+print("[ShouyuHub] Part 5/8 ready")
+-- ============================================================
+-- Part 6/8: Movement Logic (Speed 4500 Ground Run)
 -- ============================================================
 local Fly = { Active = false, Target = nil, Character = nil, Arrived = false }
 
@@ -650,7 +621,6 @@ local function flyStop()
 	if h then pcall(function() h:Move(Vector3.zero, false) end) end
 end
 
--- 2500の物理移動
 local function flyToGround(targetPos, speed, checkFn, timeout)
 	speed = speed or CFG.SpeedToEgg
 	timeout = timeout or 60
@@ -717,7 +687,7 @@ local function flyToGround(targetPos, speed, checkFn, timeout)
 		local moveDist = moveDiff.Magnitude
 		local unit = moveDiff.Unit
 
-		-- 減速計算（ChilliHubの教訓）
+		-- 4500対応の強烈な減速計算
 		local desiredSpeed = math.min(speed, math.sqrt(2 * CFG.Decel * moveDist))
 		local v = unit * desiredSpeed
 
@@ -731,7 +701,6 @@ local function flyToGround(targetPos, speed, checkFn, timeout)
 	return Fly.Arrived
 end
 
--- Instant TP 補助関数 (yslemEggから)
 local function frozenCamera()
 	local camera = workspace.CurrentCamera
 	if not camera then return function() end end
@@ -788,13 +757,22 @@ local function fpsOff()
 	if typeof(setfpscap) == "function" then pcall(setfpscap, 240) end
 end
 
-print("[ShouyuHub] Part 6/8 ready")-- ============================================================
--- Part 7/8: Actions (Grab, Instant TP Home, Steal Loop)
+print("[ShouyuHub] Part 6/8 ready")
+-- ============================================================
+-- ============================================================
+-- Part 7/8: Actions (Grab tuned for Speed 4500, Instant TP, Loop)
 -- ============================================================
 local function grabEggAt(uid, eggPos)
 	status("掴み中")
 	local rp = root()
 	if not rp then return false end
+
+	-- ★4500の慣性を完全に殺してビタッと止まる
+	pcall(function()
+		rp.AssemblyLinearVelocity = Vector3.zero
+		rp.AssemblyAngularVelocity = Vector3.zero
+	end)
+	task.wait(0.04) -- サーバー同期待ち
 
 	local prompt = promptNear(eggPos, CFG.GrabRadius)
 	if prompt and typeof(fireproximityprompt) == "function" then
@@ -822,7 +800,6 @@ local function grabEggAt(uid, eggPos)
 	return state.Carrying and state.Uid == uid
 end
 
--- Instant TP 帰還 (yslemEggの核)
 local function instantTP(uid)
 	local started = os.clock()
 	local lineX, lineY = lineInfo()
@@ -840,7 +817,6 @@ local function instantTP(uid)
 	pcall(postClone)
 	fpsOn()
 
-	-- ホップループ
 	while x - hopStep > landing.X and not state.Cancel do
 		if not state.Carrying then
 			if not regrab(uid) then break end
@@ -877,7 +853,6 @@ local function instantTP(uid)
 		end
 	end
 
-	-- 着地処理
 	status("Instant TP: landing next to the line")
 	landing = Vector3.new(landing.X, groundY(landing, landing.Y), landing.Z)
 	local function land()
@@ -900,7 +875,6 @@ local function instantTP(uid)
 	end
 	dropClone()
 
-	-- 落として拾い直す
 	if state.Carrying and not state.Cancel then
 		local delay = 0
 		while delay < CFG.DropDelay do delay += RunService.Heartbeat:Wait() end
@@ -913,7 +887,7 @@ local function instantTP(uid)
 		releaseCamera()
 		dropClone()
 		status("Instant TP: taking the egg back")
-		if not grab(uid, 3) and not regrab(uid) then
+		if not grabEggAt(uid, eggPosition(uid) or r.Position) and not regrab(uid) then
 			fpsOff()
 			return false
 		end
@@ -921,7 +895,6 @@ local function instantTP(uid)
 	end
 	releaseCamera()
 
-	-- 安全圏へ滑空 (runHome)
 	local ok = false
 	if state.Carrying then
 		ok = runHome(lineX, laneZ)
@@ -930,7 +903,6 @@ local function instantTP(uid)
 	return ok or state.Delivered >= started
 end
 
--- 滑空帰還 (yslemEgg方式)
 local function runHome(lineX, laneZ)
 	local started = os.clock()
 	local home = homePoint()
@@ -1006,10 +978,9 @@ local function regrab(uid)
 	if r and egg and Vector3.new(r.Position.X - egg.X, 0, r.Position.Z - egg.Z).Magnitude > 40 then
 		place(egg + Vector3.new(0, 3, 0))
 	end
-	return grab(uid, 3)
+	return grabEggAt(uid, egg or r.Position)
 end
 
--- 全体のスティール処理
 local function stealAndDeliver(uid, retry)
 	if state.Busy then return false end
 	state.Busy = true
@@ -1030,7 +1001,7 @@ local function stealAndDeliver(uid, retry)
 				while state.Carrying and waited < 1 do waited += RunService.Heartbeat:Wait() end
 			end
 
-			status("卵へ移動中")
+			status("卵へ移動中 (Speed: 4500)")
 			if not flyToGround(egg, CFG.SpeedToEgg) then return end
 			if not grabEggAt(uid, egg) then return end
 			
@@ -1045,7 +1016,6 @@ local function stealAndDeliver(uid, retry)
 	return true
 end
 
--- ループ
 local autoFilter = { MinRarity = 0, MinValue = 0 }
 local blocked = {}
 local autoLoop = { Active = false, Thread = nil }
@@ -1091,12 +1061,14 @@ local function startAutoLoop()
 		autoLoop.Active = false
 	end)
 end
+
 local function stopAutoLoop()
 	autoLoop.Active = false
 	if autoLoop.Thread then pcall(task.cancel, autoLoop.Thread); autoLoop.Thread = nil end
 end
 
-print("[ShouyuHub] Part 7/8 ready")-- ============================================================
+print("[ShouyuHub] Part 7/8 ready")
+-- ============================================================
 -- Part 8/8: UI + Init
 -- ============================================================
 print("[ShouyuHub] UI 構築開始")
@@ -1192,7 +1164,7 @@ local sub = Instance.new("TextLabel", header)
 sub.Size = UDim2.new(1, -140, 0, 14)
 sub.Position = UDim2.fromOffset(52, 26)
 sub.BackgroundTransparency = 1
-sub.Text = "HYBRID / INSTANT TP"
+sub.Text = "SPEED 4500 / HYBRID"
 sub.TextColor3 = THEME.TextDim
 sub.Font = Enum.Font.GothamBold
 sub.TextSize = 9
@@ -1517,5 +1489,5 @@ task.spawn(function()
 end)
 
 shieldStart()
-status("待機中")
+status("待機中 (Speed 4500)")
 print("[ShouyuHub] 起動完了 (8/8)")
