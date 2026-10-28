@@ -700,27 +700,21 @@ local function runToEgg(uid, egg)
 end
 
 -- ★ 帰還（ChilliHub方式 / 3点ウェイポイント）
+-- ★ 帰還（純粋な物理移動・速度1000）
 local function runHome(deliveryStartAt)
 	local r = root()
 	if not r then return false end
 	local home = homePoint()
-	local maxY = math.max(r.Position.Y, home.Y) + 70
 
 	local function carryStop()
 		return state.Delivered >= deliveryStartAt or state.Cancel or not state.Carrying
 	end
 
-	status("帰還: 上昇")
-	flyToChilli(Vector3.new(r.Position.X, maxY, r.Position.Z), CFG.SpeedHome, carryStop, CFG.HomeTimeLimit)
-	if not carryStop() then
-		status("帰還: 横移動")
-		flyToChilli(Vector3.new(home.X, maxY, home.Z), CFG.SpeedHome, carryStop, CFG.HomeTimeLimit)
-	end
-	if not carryStop() then
-		status("帰還: 降下")
-		flyToChilli(home, CFG.SpeedHome, carryStop, CFG.HomeTimeLimit)
-	end
+	status("帰還中")
+	-- 行きと同じ物理移動（flyToGround）を使って家へ帰る
+	flyToGround(home, CFG.SpeedHome, carryStop, CFG.HomeTimeLimit)
 
+	-- 着地と納品
 	status("納品中")
 	local settle = 0
 	while settle < 2 and state.Carrying and state.Delivered < deliveryStartAt and not state.Cancel do
@@ -731,7 +725,9 @@ local function runHome(deliveryStartAt)
 		local h = hum()
 		if h then pcall(function() h.PlatformStand = false; h:Move(Vector3.zero, false) end) end
 		task.wait(0.2)
+		-- 卵を落とす（必須）
 		dropEgg()
+		
 		local waited = 0
 		while state.Delivered < deliveryStartAt and waited < 1.5 do
 			waited += RunService.Heartbeat:Wait()
@@ -739,7 +735,6 @@ local function runHome(deliveryStartAt)
 	end
 	return state.Delivered >= deliveryStartAt
 end
-
 local function stealAndDeliver(uid, retry)
 	if state.Busy then return false end
 	state.Busy = true
