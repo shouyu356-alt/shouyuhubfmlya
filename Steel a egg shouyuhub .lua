@@ -10,8 +10,10 @@ local TweenService      = game:GetService("TweenService")
 local localPlayer       = Players.LocalPlayer
 
 local CFG = {
-	HopStep = 60,       -- 1回のワープ距離 (スタッズ)
-	HopDelay = 0.3,     -- ワープ間の待機時間 (秒)
+	-- 移動設定（検証済みの限界値）
+	HopStep = 95,       -- ★ 60から95に変更（100未満に抑える）
+	HopDelay = 0.1,     -- ★ 0.3から0.1に変更（待機時間を短縮）
+	
 	GrabRadius = 15,
 	GrabRetrySec = 1.5,
 	StealTimeLimit = 120,
