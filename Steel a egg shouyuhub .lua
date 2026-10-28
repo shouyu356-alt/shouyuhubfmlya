@@ -12,7 +12,7 @@ local localPlayer       = Players.LocalPlayer
 local CFG = {
 	-- 移動設定
 	HopStep = 100,
-	HopDelay = 0.01,   -- ★ 最初は0.001秒でぶっ飛ばす
+	HopDelay = 0.15,   -- ★ 最初は0.001秒でぶっ飛ばす
 	GrabRadius = 15,
 	GrabRetrySec = 1.5,
 	StealTimeLimit = 120,
