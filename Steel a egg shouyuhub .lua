@@ -1,5 +1,5 @@
 -- ============================================================
--- ShouyuHub | Auto Steal (Pure Physics Build)
+-- ShouyuHub | Auto Steal (Definitive Clean Build)
 -- Part 1/8: Header / Config / Dependencies
 -- ============================================================
 local Players           = game:GetService("Players")
@@ -13,8 +13,8 @@ local CFG = {
 	-- 移動
 	SpeedToEgg      = 3000,    -- 行きの速度
 	SpeedHome       = 1000,    -- 帰りの速度
-	ArriveDist      = 5,       -- 到着判定の水平距離
-	Decel           = 50000,   -- 減速度（オーバーシュート防止）
+	ArriveDist      = 6,       -- 到着判定の水平距離
+	Decel           = 60000,   -- 行きの減速度（オーバーシュート防止）
 
 	-- 掴み
 	GrabRadius      = 12,
@@ -214,7 +214,7 @@ local function walkSpeed()
 end
 
 print("[ShouyuHub] Part 2/8 ready")-- ============================================================
--- Part 3/8: State + Events
+-- Part 3/8: State + Events + Drop
 -- ============================================================
 local state = {
 	Carrying      = false,
@@ -271,7 +271,7 @@ local function takeEgg(uid)
 	end
 end
 
--- ★ 絶対に必要な卵落とし
+-- ★ 卵を落とす（必須）
 local function dropEgg()
 	if type(EggState) == "table" and type(EggState.DropFieldEgg) == "function" then
 		state.SentDropAt = os.clock()
@@ -319,7 +319,7 @@ task.spawn(function()
 end)
 
 print("[ShouyuHub] Part 3/8 ready")-- ============================================================
--- Part 4/8: Snapshot + Navigation
+-- Part 4/8: Snapshot + Egg Info
 -- ============================================================
 local function money(value)
 	value = tonumber(value) or 0
@@ -475,7 +475,6 @@ local function promptNear(position, radius)
 end
 
 print("[ShouyuHub] Part 5/8 ready")-- ============================================================
--- ============================================================
 -- Part 6/8: Movement (Ground Run & Chilli Waypoint)
 -- ============================================================
 local Fly = { Active = false, Target = nil, Character = nil, Arrived = false }
@@ -568,7 +567,7 @@ local function flyToGround(targetPos, speed, checkFn, timeout)
 	return Fly.Arrived
 end
 
--- ★ 帰り用：ChilliHub方式（CFrameと速度の同期）
+-- 帰り用：ChilliHub方式（CFrameと速度の同期）
 local function flyToChilli(targetPos, speed, checkFn, timeout)
 	speed = speed or CFG.SpeedHome
 	timeout = timeout or 60
@@ -588,7 +587,6 @@ local function flyToChilli(targetPos, speed, checkFn, timeout)
 	local started = os.clock()
 	local trackedPos = r.Position
 
-	-- 速度同期（サーバーへ物理移動に見せる）
 	local conn2 = RunService.PreSimulation:Connect(function(dt)
 		if not Fly.Active or Fly.Arrived then return end
 		local rp = root()
@@ -602,7 +600,6 @@ local function flyToChilli(targetPos, speed, checkFn, timeout)
 		end)
 	end)
 
-	-- 位置強制（確実に目的地へ）
 	local conn1 = RunService.Heartbeat:Connect(function(dt)
 		if not Fly.Active or Fly.Arrived then return end
 		if checkFn and checkFn() then Fly.Active = false; return end
@@ -619,7 +616,6 @@ local function flyToChilli(targetPos, speed, checkFn, timeout)
 			trackedPos = trackedPos + diff.Unit * step
 		end
 		
-		-- 引っ張り返されたら位置をリセット
 		if (rp.Position - trackedPos).Magnitude > 40 then trackedPos = rp.Position end
 
 		local look = Vector3.new(diff.X, 0, diff.Z)
@@ -646,16 +642,13 @@ local function flyToChilli(targetPos, speed, checkFn, timeout)
 	return ok
 end
 
-print("[ShouyuHub] Part 6/8 ready")
+print("[ShouyuHub] Part 6/8 ready")-- ============================================================
 -- Part 7/8: Actions
 -- ============================================================
 local function grabEggAt(uid, eggPos)
 	status("掴み中")
 	
-	local rp = root()
 	local prompt = promptNear(eggPos, CFG.GrabRadius)
-	
-	-- プロンプトとモジュールを同時に叩く
 	if prompt and typeof(fireproximityprompt) == "function" then
 		pcall(function() prompt.HoldDuration = 0 end)
 		task.spawn(function() pcall(fireproximityprompt, prompt) end)
@@ -664,23 +657,15 @@ local function grabEggAt(uid, eggPos)
 
 	local waited = 0
 	while not (state.Carrying and state.Uid == uid) and waited < CFG.GrabRetrySec and not state.Cancel do
-		-- 0.2秒ごとに再試行
 		if math.floor(waited * 10) % 2 == 0 then
 			local eggNow = eggPosition(uid, true)
 			if not eggNow then break end
-			
-			-- 万が一離れていたら物理的に近づく
-			if rp then
-				local flat = Vector3.new(eggNow.X - rp.Position.X, 0, eggNow.Z - rp.Position.Z)
-				if flat.Magnitude > 3 then
-					local v = flat.Unit * math.min(50, flat.Magnitude / 0.05)
-					pcall(function() rp.AssemblyLinearVelocity = Vector3.new(v.X, 0, v.Z) end)
+			local rp2 = root()
+			if rp2 then
+				local p = promptNear(eggNow, CFG.GrabRadius)
+				if p and typeof(fireproximityprompt) == "function" then
+					pcall(function() p.HoldDuration = 0; fireproximityprompt(p) end)
 				end
-			end
-			
-			local p = promptNear(eggNow, CFG.GrabRadius)
-			if p and typeof(fireproximityprompt) == "function" then
-				pcall(function() p.HoldDuration = 0; fireproximityprompt(p) end)
 			end
 			task.spawn(takeEgg, uid)
 		end
@@ -702,16 +687,11 @@ local function runToEgg(uid, egg)
 		if not eggNow then return false end
 
 		status("卵へ移動中" .. (attempt > 1 and (" (" .. attempt .. ")") or ""))
-		-- 速度3000で物理移動
 		local ok = flyToGround(eggNow, CFG.SpeedToEgg, function()
 			return state.Cancel or os.clock() - started > CFG.StealTimeLimit
 		end, CFG.StealTimeLimit)
 
-		-- 到着したら、または近くなら掴む
-		local rp = root()
-		if ok or (rp and Vector3.new(eggNow.X - rp.Position.X, 0, eggNow.Z - rp.Position.Z).Magnitude <= CFG.ArriveDist + 3) then
-			if grabEggAt(uid, eggNow) then return true end
-		end
+		if ok then return grabEggAt(uid, eggNow) end
 
 		if isRagdolled() then waitRagdollEnd() end
 		if attempt < CFG.MaxRetries and not state.Cancel then task.wait(1) end
@@ -730,23 +710,17 @@ local function runHome(deliveryStartAt)
 		return state.Delivered >= deliveryStartAt or state.Cancel or not state.Carrying
 	end
 
-	-- ① 上昇（今の位置のまま真上へ）
 	status("帰還: 上昇")
 	flyToChilli(Vector3.new(r.Position.X, maxY, r.Position.Z), CFG.SpeedHome, carryStop, CFG.HomeTimeLimit)
-
-	-- ② 水平移動（家の真上へ）
 	if not carryStop() then
 		status("帰還: 横移動")
 		flyToChilli(Vector3.new(home.X, maxY, home.Z), CFG.SpeedHome, carryStop, CFG.HomeTimeLimit)
 	end
-
-	-- ③ 降下（家へ）
 	if not carryStop() then
 		status("帰還: 降下")
 		flyToChilli(home, CFG.SpeedHome, carryStop, CFG.HomeTimeLimit)
 	end
 
-	-- ④ 着地と納品
 	status("納品中")
 	local settle = 0
 	while settle < 2 and state.Carrying and state.Delivered < deliveryStartAt and not state.Cancel do
@@ -755,24 +729,17 @@ local function runHome(deliveryStartAt)
 
 	if state.Carrying and state.Delivered < deliveryStartAt and not state.Cancel then
 		local h = hum()
-		if h then
-			pcall(function()
-				h.PlatformStand = false
-				h:Move(Vector3.zero, false)
-			end)
-		end
+		if h then pcall(function() h.PlatformStand = false; h:Move(Vector3.zero, false) end) end
 		task.wait(0.2)
-		-- ★ 卵を落とす（これがないと検知されない）
 		dropEgg()
-		
 		local waited = 0
 		while state.Delivered < deliveryStartAt and waited < 1.5 do
 			waited += RunService.Heartbeat:Wait()
 		end
 	end
-
 	return state.Delivered >= deliveryStartAt
 end
+
 local function stealAndDeliver(uid, retry)
 	if state.Busy then return false end
 	state.Busy = true
