@@ -1,5 +1,5 @@
 -- ============================================================
--- ShouyuHub | Part 1/5: Config / Dependencies / State / Events / Helpers
+-- ShouyuHub | Ultimate Steal (Improved Instant TP)
 -- ============================================================
 local Players           = game:GetService("Players")
 local RunService        = game:GetService("RunService")
@@ -59,7 +59,6 @@ local Mutations         = safeRequire(function() return ReplicatedStorage.Shared
 
 local function remote(name) return networkingFolder:FindFirstChild(name) end
 local function root() return localPlayer.Character and localPlayer.Character:FindFirstChild("HumanoidRootPart") end
-local function hum() return localPlayer.Character and localPlayer.Character:FindFirstChildOfClass("Humanoid") end
 
 local statusLabel = nil
 local guiRef = nil
@@ -253,7 +252,7 @@ local function promptNear(pos, rad)
     end
     return best
 end-- ============================================================
--- Part 2/5: Shield + Engine primitives
+-- Shield + Engine
 -- ============================================================
 local shield = { Original = nil, Clone = nil, Links = {}, Connection = nil, Added = nil }
 
@@ -395,12 +394,6 @@ local function shieldStart()
             end
         end)
     end)
-end
-
-local function shieldStop()
-    if shield.Connection then shield.Connection:Disconnect(); shield.Connection = nil end
-    if shield.Added then shield.Added:Disconnect(); shield.Added = nil end
-    shieldUndo()
 end
 
 local function pivotTo(pos, faceAt)
@@ -581,18 +574,15 @@ local function avoid(from, to)
         end
     end
     return to
-	end-- ============================================================
--- Part 3/5: Movement + Grab + Instant TP
--- ============================================================
+end
 
 -- ============================================================
--- runToEgg: PivotTo を毎フレーム呼んで確実に 4500 studs/s
---   * Humanoid の WalkSpeed は使わない (サーバー側で上書きされるため)
---   * PivotTo は CFrame を直接書き換えるので速度制限を完全にバイパス
---   * 実 dt を Heartbeat から取得し、4500 * dt スタッズを毎フレーム進める
+-- runToEgg (4500 studs/s PivotTo + 最後の15 studsは歩行)
 -- ============================================================
 local function runToEgg(uid, egg)
-    local SPEED = 4500  -- <<< 確実に 4500 studs/s
+    local SPEED = 4500
+    local WALK_ZONE = 15
+    local GRAB_ZONE = 10
 
     local character = localPlayer.Character
     local h = character and character:FindFirstChildOfClass("Humanoid")
@@ -637,26 +627,28 @@ local function runToEgg(uid, egg)
         local delta = waypoint - r.Position
         local flat = Vector3.new(delta.X, 0, delta.Z)
 
-        if stage == "field" and flat.Magnitude <= 5 then break end
+        if stage == "field" and flat.Magnitude <= 2.5 then break end
 
-        -- 1フレームで 4500 * dt スタッズ進む。残距離がそれ未満ならぴったり到着。
-        local step = math.min(SPEED * dt, flat.Magnitude)
-        if step > 0.01 then
-            local nextPos = r.Position + flat.Unit * step + Vector3.new(0, 2, 0)
-            -- PivotTo でキャラ全体をテレポート
-            pivotTo(nextPos)
-            -- 直後に速度をゼロにして Humanoid コントローラに邪魔されないように
-            local rr = root()
-            if rr then
-                pcall(function()
-                    rr.AssemblyLinearVelocity = Vector3.zero
-                    rr.AssemblyAngularVelocity = Vector3.zero
-                end)
+        if stage == "field" and flat.Magnitude <= WALK_ZONE then
+            local speed = math.max(walkSpeed() * CFG.SpeedCap, 8)
+            local v = flat.Unit * math.min(speed, flat.Magnitude / 0.05)
+            setVelocity(v, dt)
+            if flat.Magnitude <= GRAB_ZONE then
+                task.spawn(takeEgg, uid)
             end
-        end
-
-        if stage == "field" and flat.Magnitude <= 12 then
-            task.spawn(takeEgg, uid)
+        else
+            local step = math.min(SPEED * dt, flat.Magnitude)
+            if step > 0.01 then
+                local nextPos = r.Position + flat.Unit * step + Vector3.new(0, 2, 0)
+                pivotTo(nextPos)
+                local rr = root()
+                if rr then
+                    pcall(function()
+                        rr.AssemblyLinearVelocity = Vector3.zero
+                        rr.AssemblyAngularVelocity = Vector3.zero
+                    end)
+                end
+            end
         end
     end
 
@@ -667,6 +659,9 @@ local function runToEgg(uid, egg)
     return state.Carrying and state.Uid == uid
 end
 
+-- ============================================================
+-- Grab / InstantTP
+-- ============================================================
 local function grab(uid, timeout)
     local cache = { At = 0 }
     local waited, since = 0, 1
@@ -804,7 +799,7 @@ local function instantTP(uid)
     local laneZ = math.clamp(r.Position.Z, -425, -300)
     local landing = Vector3.new(lineX + CFG.LandOffset, lineY + 3.35, laneZ)
     local hopStep = math.max(walkSpeed() * CFG.HopRatio, CFG.HopMin)
-    local hopY = r.Position.Y + CFG.HopLift
+    local hopY = r.PPosition.Y + CFG.HopLift
     local x = r.Position.X
     local retries = 0
     local hopGap = CFG.HopGapStart
@@ -897,8 +892,10 @@ local function instantTP(uid)
     if state.Carrying then ok = runHome(lineX, laneZ) end
     fpsOff()
     return ok or state.Delivered >= started
-		end-- ============================================================
--- Part 4/5: Steal Logic
+end
+
+-- ============================================================
+-- Steal Logic
 -- ============================================================
 local function stealAndDeliver(uid, retry)
     if state.Busy then return false end
@@ -1005,8 +1002,10 @@ end
 local function stopAutoLoop()
     autoLoop.Active = false
     if autoLoop.Thread then pcall(task.cancel, autoLoop.Thread); autoLoop.Thread = nil end
-			end-- ============================================================
--- Part 5/5: UI Construction + UI Logic + Init
+end
+
+-- ============================================================
+-- UI Construction + Init
 -- ============================================================
 print("[ShouyuHub] UI 構築開始")
 local UI_W, UI_H, UI_H_MIN = 300, 440, 64
