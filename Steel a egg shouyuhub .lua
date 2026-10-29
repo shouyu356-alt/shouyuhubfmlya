@@ -1,5 +1,5 @@
 -- ============================================================
--- ShouyuHub | Ultimate Steal (Rollback Learning TP)
+-- ShouyuHub | Ultimate Steal (No-Rollback Velocity Engine)
 -- Part 1/4: Config / Dependencies / Helpers
 -- ============================================================
 local Players           = game:GetService("Players")
@@ -10,17 +10,11 @@ local TweenService      = game:GetService("TweenService")
 local localPlayer       = Players.LocalPlayer
 
 local CFG = {
-    -- 超高速TP移動設定
-    HopStep = 95,       
-    HopDelay = 0.0001,  
+    -- 速度偽装設定（アンチチートを突破できる限界値）
+    MaxSpeed = 380,      -- 秒速380スタッズ。これ以上はロールバックされやすい
+    SyncDistance = 25,   -- 目的地から25スタッズ以内で歩行に切り替えて同期
     
-    -- ロールバック学習用設定（追加）
-    HopGapMin = 0.0001,
-    HopGapMax = 0.2,
-    HopRetries = 10,
-    
-    -- 同期・掴み設定
-    SyncDistance = 25,  -- 目的地から25スタッズ以内になったら歩行に切り替えて同期
+    -- 掴み設定
     GrabRadius = 15,
     GrabRetrySec = 2,
     
@@ -62,8 +56,7 @@ local statusLabel = nil
 local gui = nil
 local function status(text) if statusLabel then statusLabel.Text = tostring(text) end end
 
--- ★ 状態管理に PulledAt (引き戻された時間) を追加
-local state = { Carrying = false, Uid = nil, Busy = false, Cancel = false, Delivered = 0, PulledAt = 0, StealThread = nil }
+local state = { Carrying = false, Uid = nil, Busy = false, Cancel = false, Delivered = 0, StealThread = nil }
 
 if type(EggState) == "table" and type(EggState.CarryChanged) == "table" then
     EggState.CarryChanged:Connect(function(arg)
@@ -78,18 +71,6 @@ pcall(function()
     local re = remote("RE/EggWorld/FieldEggRedeemVerdict")
     if re and re:IsA("RemoteEvent") then
         re.OnClientEvent:Connect(function() state.Delivered = os.clock() end)
-    end
-end)
-
--- ★ サーバーからの巻き戻し(Relocate)を検知する
-pcall(function()
-    local re = remote("RE/RigSync/Refresh")
-    if re and re:IsA("RemoteEvent") then
-        re.OnClientEvent:Connect(function(arg)
-            if type(arg) == "table" and arg.Action == "Relocate" then
-                state.PulledAt = os.clock()
-            end
-        end)
     end
 end)
 
@@ -186,101 +167,50 @@ local function promptNear(pos, rad)
 end-- ============================================================
 -- Part 2/4: Engine & Steal Logic
 -- ============================================================
-local function hopTo(targetPos, checkFn)
-    local cam = workspace.CurrentCamera
-    local oldCamType = cam.CameraType
-    pcall(function() cam.CameraType = Enum.CameraType.Scriptable; cam.CFrame = cam.CFrame end)
-    
-    local canSetFps = typeof(setfpscap) == "function"
-    if canSetFps then pcall(setfpscap, 30) end
-    
-    -- 偽装クローン配置
-    local character = localPlayer.Character
-    local decoy = nil
-    if character then
-        local wasArchivable = character.Archivable
-        character.Archivable = true
-        decoy = character:Clone()
-        character.Archivable = wasArchivable
-        if decoy then
-            for _, d in ipairs(decoy:GetDescendants()) do
-                if d:IsA("LuaSourceContainer") or d:IsA("Humanoid") then
-                    pcall(function() d:Destroy() end)
-                elseif d:IsA("BasePart") then
-                    d.Anchored = true; d.CanCollide = false; d.CanTouch = false; d.CanQuery = false
-                end
-            end
-            decoy.Name = "Clone"
-            decoy.Parent = workspace
-        end
-    end
 
+-- ★ CFrameワープを廃止し、AssemblyLinearVelocityで超高速移動するエンジン
+local function moveTo(targetPos, checkFn)
     local r = root()
-    if not r then 
-        if decoy then pcall(function() decoy:Destroy() end) end
-        pcall(function() cam.CameraType = oldCamType end)
-        if canSetFps then pcall(setfpscap, 240) end
-        return false 
-    end
+    if not r then return false end
     
-    local hopGap = CFG.HopGapMin
-    local retries = 0
+    local character = localPlayer.Character
+    local h = hum()
+    if h then h.PlatformStand = false end
+    
     local started = os.clock()
-    
     while not state.Cancel and os.clock() - started < 60 do
         if checkFn and checkFn() then break end
         r = root()
         if not r then break end
         
+        local dt = math.max(RunService.Heartbeat:Wait(), 1/240)
         local flat = Vector3.new(targetPos.X - r.Position.X, 0, targetPos.Z - r.Position.Z)
         local dist = flat.Magnitude
         
-        -- ★ 目的地付近（同期ゾーン）に入ったら、歩行(Velocity)に切り替えてサーバーと同期する
+        -- 目的地付近：歩行モード（サーバー同期）
         if dist <= CFG.SyncDistance then
-            local h = hum()
             local speed = h and (h.WalkSpeed * 1.15) or 16
             local v = flat.Unit * math.min(speed, dist / 0.05)
             pcall(function()
                 r.AssemblyLinearVelocity = v + Vector3.new(0, r.AssemblyLinearVelocity.Y, 0)
                 if h then h:Move(flat.Unit, false) end
             end)
-            task.wait(0.03)
         else
-            -- ★ 超高速ワープゾーン
-            local nextPos = r.Position + flat.Unit * CFG.HopStep + Vector3.new(0, 3, 0)
-            local pulledBefore = state.PulledAt
-            
+            -- 超高速移動モード：速度偽装で物理的に飛ばす
+            local speed = math.min(CFG.MaxSpeed, dist / dt)
+            local v = flat.Unit * speed
             pcall(function()
-                r.CFrame = CFrame.new(nextPos)
-                r.AssemblyLinearVelocity = Vector3.zero
+                -- 上方向の重力を打ち消して地面スレスレを飛ぶ
+                r.AssemblyLinearVelocity = v + Vector3.new(0, workspace.Gravity * dt * 0.5, 0)
                 r.AssemblyAngularVelocity = Vector3.zero
+                if h then h:Move(flat.Unit, false) end
             end)
-            
-            task.wait(hopGap)
-            
-            -- ★ ロールバック検知
-            local check = root()
-            local pulled = state.PulledAt > pulledBefore or (check and (check.Position - nextPos).Magnitude > 30)
-            
-            if pulled then
-                retries += 1
-                -- 引き戻されたら待機時間を少し延ばす（学習）
-                hopGap = math.min(CFG.HopGapMax, hopGap + 0.01)
-                if retries > CFG.HopRetries then 
-                    break 
-                end
-                task.wait(0.1) -- サーバーの位置更新を待つ
-            else
-                -- 成功したら徐々に最速に戻す
-                hopGap = math.max(CFG.HopGapMin, hopGap - 0.001)
-            end
         end
     end
-
-    if hum() then hum():Move(Vector3.zero, false) end
-    if decoy then pcall(function() decoy:Destroy() end) end
-    pcall(function() cam.CameraType = oldCamType end)
-    if canSetFps then pcall(setfpscap, 240) end
+    
+    if h then h:Move(Vector3.zero, false) end
+    local current = root()
+    if current then pcall(function() current.AssemblyLinearVelocity = Vector3.zero end) end
     return true
 end
 
@@ -319,14 +249,14 @@ local function stealAndDeliver(uid, retry)
         if not eggPos then status("卵が見つかりません"); break end
         
         status("卵へ移動中" .. (attempt > 1 and (" (" .. attempt .. ")") or ""))
-        hopTo(eggPos, function() return state.Cancel end)
+        moveTo(eggPos, function() return state.Cancel end)
         
         if state.Cancel then break end
 
         status("掴み中")
         if grabEgg(uid, eggPos) then
             status("帰還中...")
-            hopTo(homePoint(), function() return state.Delivered >= started or not state.Carrying or state.Cancel end)
+            moveTo(homePoint(), function() return state.Delivered >= started or not state.Carrying or state.Cancel end)
             
             if state.Cancel then break end
             
@@ -661,7 +591,6 @@ refreshBtn.MouseButton1Click:Connect(function()
     if not state.Busy then rebuild(); status("更新完了") end
 end)
 
--- ★ キャンセル処理の強化
 instantBtn.MouseButton1Click:Connect(function()
     if state.Busy then
         state.Cancel = true
