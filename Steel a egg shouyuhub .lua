@@ -10,7 +10,6 @@ local TweenService      = game:GetService("TweenService")
 local localPlayer       = Players.LocalPlayer
 
 local CFG = {
-    -- Hop engine (learned gap, velocity based)
     HopGapMin      = 0.06,
     HopGapMax      = 0.20,
     HopGapStart    = 0.06,
@@ -22,23 +21,19 @@ local CFG = {
     LandSettle     = 0.08,
     DropDelay      = 0.05,
 
-    -- Grab
     GrabRadius     = 15,
     GrabInterval   = 0.03,
     GrabTimeout    = 4,
     RegrabFar      = 40,
 
-    -- Speed
     SpeedCap       = 1.15,
     CarryRatio     = 0.9,
     EasyRatio      = 1.3,
     Height         = 70,
     ClimbShare     = 0.5,
 
-    -- Snapshot
     SnapshotTTL    = 0.5,
 
-    -- Loop
     MaxRetries     = 3,
     BlockedSec     = 30,
     AutoRefresh    = 3,
@@ -75,17 +70,11 @@ local statusLabel = nil
 local guiRef = nil
 local function status(text) if statusLabel then statusLabel.Text = tostring(text) end end
 
--- ============================================================
--- State
--- ============================================================
 local state = {
     Carrying = false, Uid = nil, Busy = false, Cancel = false, Delivered = 0,
     Mult = 1, PulledAt = 0, HeldSeen = 0, GuessedDrop = false, ReleaseCamera = nil,
 }
 
--- ============================================================
--- Events
--- ============================================================
 if type(EggState) == "table" and type(EggState.CarryChanged) == "table" then
     EggState.CarryChanged:Connect(function(arg)
         local carrying = type(arg) == "table" and arg.IsCarrying == true
@@ -108,7 +97,6 @@ pcall(function()
     end
 end)
 
--- Relocate = the server pulled us back; the hop can simply retry from the same spot
 pcall(function()
     local re = remote("RE/RigSync/Refresh")
     if re and re:IsA("RemoteEvent") then
@@ -132,7 +120,6 @@ local function dropEgg()
     end
 end
 
--- Catch a missed carry signal via the egg's weld to our character
 local function heldByMe(uid)
     local character = localPlayer.Character
     if type(uid) ~= "string" or not character then return false end
@@ -164,9 +151,6 @@ task.spawn(function()
     end
 end)
 
--- ============================================================
--- Helpers
--- ============================================================
 local function money(value)
     value = tonumber(value) or 0
     local units = { { 1e12, "T" }, { 1e9, "B" }, { 1e6, "M" }, { 1e3, "K" } }
@@ -197,9 +181,6 @@ local function lineInfo()
     return ok and world.Position.X or 552.2, ok and world.Position.Y or 67.67
 end
 
--- ============================================================
--- Snapshot (fallback) + direct workspace read
--- ============================================================
 local snapshotCache = { At = 0, List = {} }
 local function snapshot(force)
     local now = os.clock()
@@ -224,7 +205,6 @@ local function snapshot(force)
     return list
 end
 
--- Direct workspace read first (works even without a snapshot call)
 local function eggNow(uid, cache)
     local node = workspace:FindFirstChild(uid)
     local slots = workspace:FindFirstChild("AreaEggSlotsClient")
@@ -279,10 +259,6 @@ local function promptNear(pos, rad)
     return best
 end-- ============================================================
 -- Part 2/5: Shield + Engine primitives
--- ============================================================
-
--- ============================================================
--- Humanoid Swap shield
 -- ============================================================
 local shield = { Original = nil, Clone = nil, Links = {}, Connection = nil, Added = nil }
 
@@ -436,9 +412,6 @@ local function shieldStop()
     shieldUndo()
 end
 
--- ============================================================
--- Velocity engine (PivotTo + AssemblyLinearVelocity + gravity comp)
--- ============================================================
 local function pivotTo(pos, faceAt)
     local character = localPlayer.Character
     local r = root()
@@ -476,9 +449,6 @@ local function stopMotion()
     end)
 end
 
--- ============================================================
--- FPS toggle (60/30 alternating)
--- ============================================================
 local fpsGen = 0
 local function fpsOn()
     if typeof(setfpscap) ~= "function" then return end
@@ -500,9 +470,6 @@ local function fpsOff()
     if typeof(setfpscap) == "function" then pcall(setfpscap, 240) end
 end
 
--- ============================================================
--- Camera freeze (restore at the very end)
--- ============================================================
 local function frozenCamera()
     local cam = workspace.CurrentCamera
     if not cam then return function() end end
@@ -517,9 +484,6 @@ local function frozenCamera()
     end
 end
 
--- ============================================================
--- Decoy clone (stays at the egg position)
--- ============================================================
 local stealClone = nil
 local function dropClone()
     local copy = stealClone
@@ -552,9 +516,6 @@ local function postClone()
     end
 end
 
--- ============================================================
--- Danger zones (portals / arenas / teleporters)
--- ============================================================
 local dangerCache, dangerAt = {}, 0
 
 local function dangers()
@@ -635,7 +596,7 @@ local function avoid(from, to)
 -- ============================================================
 
 -- ============================================================
--- runToEgg: velocity ground run with danger avoidance + stuck jump
+-- runToEgg: >>> ONLY CHANGE: speed = 4500 <<<
 -- ============================================================
 local function runToEgg(uid, egg)
     local lineX = lineInfo()
@@ -676,7 +637,7 @@ local function runToEgg(uid, egg)
         local waypoint = avoid(r.Position, target)
         local flat = Vector3.new(waypoint.X - r.Position.X, 0, waypoint.Z - r.Position.Z)
         local unit = flat.Magnitude > 0.01 and flat.Unit or Vector3.zero
-        local speed = math.max(walkSpeed() * CFG.SpeedCap, 8)
+        local speed = 4500   -- <<< CHANGED: was math.max(walkSpeed() * CFG.SpeedCap, 8)
         local v = unit * math.min(speed, flat.Magnitude / 0.05)
         setVelocity(v, RunService.Heartbeat:Wait())
 
@@ -704,7 +665,7 @@ local function runToEgg(uid, egg)
 end
 
 -- ============================================================
--- grab: 30ms interval, follows the egg
+-- grab
 -- ============================================================
 local function grab(uid, timeout)
     local cache = { At = 0 }
@@ -754,9 +715,6 @@ local function regrab(uid)
     return grab(uid, 3)
 end
 
--- ============================================================
--- Carry speed: distance-based plan (same as the hub)
--- ============================================================
 local function carrySpeed(distance)
     local ws = walkSpeed()
     local base = ws * math.min(CFG.CarryRatio, CFG.SpeedCap) * state.Mult
@@ -769,9 +727,6 @@ local function carrySpeed(distance)
     return math.min(math.max(math.min(base * CFG.EasyRatio, limit), base), math.max(ws * CFG.SpeedCap, base))
 end
 
--- ============================================================
--- runHome: rise above base, descend, drop fallback
--- ============================================================
 local function runHome(lineX, laneZ)
     local started = os.clock()
     local home = homePoint()
@@ -842,9 +797,6 @@ local function runHome(lineX, laneZ)
     return state.Delivered >= started
 end
 
--- ============================================================
--- instantTP: hop home (learned gap, Relocate aware) + land + drop + regrab + runHome
--- ============================================================
 local function place(position)
     pivotTo(position)
     stopMotion()
@@ -906,7 +858,6 @@ local function instantTP(uid)
         end
     end
 
-    -- landing
     status("Instant TP: ライン付近に着地")
     local function land()
         local current = root()
@@ -930,7 +881,6 @@ local function instantTP(uid)
     end
     dropClone()
 
-    -- drop and regrab
     if state.Carrying and not state.Cancel then
         local delay = 0
         while delay < CFG.DropDelay do
@@ -962,7 +912,6 @@ local function instantTP(uid)
 		end-- ============================================================
 -- Part 4/5: Steal Logic
 -- ============================================================
-
 local function stealAndDeliver(uid, retry)
     if state.Busy then return false end
     state.Busy = true
@@ -1029,9 +978,6 @@ local function stealAndDeliver(uid, retry)
     return succeeded
 end
 
--- ============================================================
--- Auto loop
--- ============================================================
 local autoFilter = { MinRarity = 0, MinValue = 0 }
 local blocked = {}
 local autoLoop = { Active = false, Thread = nil }
@@ -1079,8 +1025,7 @@ local function stopAutoLoop()
     autoLoop.Active = false
     if autoLoop.Thread then pcall(task.cancel, autoLoop.Thread); autoLoop.Thread = nil end
 			end-- ============================================================
--- ============================================================
--- Part 5/5: UI Construction + UI Logic + Init (unchanged)
+-- Part 5/5: UI Construction + UI Logic + Init
 -- ============================================================
 print("[ShouyuHub] UI 構築開始")
 local UI_W, UI_H, UI_H_MIN = 300, 440, 64
@@ -1403,9 +1348,6 @@ UserInputService.InputChanged:Connect(function(input)
     main.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
 end)
 
--- ============================================================
--- Init
--- ============================================================
 task.spawn(function()
     while gui.Parent do
         task.wait(CFG.AutoRefresh)
@@ -1432,7 +1374,6 @@ task.spawn(function()
     status("待機中")
 end)
 
--- Start the shield immediately so the whole run is protected
 shieldStart()
 
 print("[ShouyuHub] 起動完了")
