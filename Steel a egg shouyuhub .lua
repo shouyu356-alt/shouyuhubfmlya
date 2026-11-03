@@ -1,6 +1,6 @@
 -- ============================================================
--- ShouyuHub | Ultimate Steal (Guard-Hit Sync & Multi-Fire)
--- Part 1/5: Config / Helpers / Guard Detection
+-- ShouyuHub | Ultimate Steal (Clone & Instant TP)
+-- Part 1/5: Config / Helpers / Clone Engine
 -- ============================================================
 local Players           = game:GetService("Players")
 local RunService        = game:GetService("RunService")
@@ -10,14 +10,10 @@ local TweenService      = game:GetService("TweenService")
 local localPlayer       = Players.LocalPlayer
 
 local CFG = {
-    HopStep        = 95,
-    HopDelay       = 0.0001,
-    HopGapMin      = 0.0001,
-    HopGapMax      = 0.2,
-    HopRetries     = 10,
-    SyncDistance   = 25,
-    GrabInterval   = 0.03,
-    GrabTimeout    = 3,
+    Speed          = 4500,  -- 瞬間移動の速度
+    GrabInterval   = 0.03,  -- 掴みの連打間隔
+    GrabTimeout    = 3,     -- 掴みのタイムアウト
+    SyncWaitTime   = 0.15,  -- 帰還後のサーバー同期ウェイト
     SnapshotTTL    = 0.5,
     MaxRetries     = 3,
     BlockedSec     = 30,
@@ -55,7 +51,7 @@ local statusLabel = nil
 local guiRef = nil
 local function status(text) if statusLabel then statusLabel.Text = tostring(text) end end
 
-local state = { Carrying = false, Uid = nil, Busy = false, Cancel = false, Delivered = 0, PulledAt = 0, StealThread = nil }
+local state = { Carrying = false, Uid = nil, Busy = false, Cancel = false, Delivered = 0, StealThread = nil }
 
 if type(EggState) == "table" and type(EggState.CarryChanged) == "table" then
     EggState.CarryChanged:Connect(function(arg)
@@ -70,17 +66,6 @@ pcall(function()
     local re = remote("RE/EggWorld/FieldEggRedeemVerdict")
     if re and re:IsA("RemoteEvent") then
         re.OnClientEvent:Connect(function() state.Delivered = os.clock() end)
-    end
-end)
-
-pcall(function()
-    local re = remote("RE/RigSync/Refresh")
-    if re and re:IsA("RemoteEvent") then
-        re.OnClientEvent:Connect(function(arg)
-            if type(arg) == "table" and arg.Action == "Relocate" then
-                state.PulledAt = os.clock()
-            end
-        end)
     end
 end)
 
@@ -105,19 +90,6 @@ local function money(value)
     return string.format("$%d/s", math.floor(value + 0.5))
 end
 
-local function homePoint()
-    for _, def in ipairs({
-        { { "GearGiver_Slap", "Podium" }, Vector3.new(-16.415, 21.072, -6.106) },
-        { { "World", "Machines", "RiftMachine", "Rift", "Meshes/VoidPortal_Cube.003" }, Vector3.new(-26.776, 1.75, 18.665) },
-        { { "__OBJECTS", "Machines", "RiftMachine", "Rift", "Meshes/VoidPortal_Cube.003" }, Vector3.new(-26.776, 1.75, 18.665) },
-    }) do
-        local node = workspace
-        for _, name in ipairs(def[1]) do node = node and node:FindFirstChild(name) or nil end
-        if node and node:IsA("BasePart") then return node.CFrame:PointToWorldSpace(def[2]) end
-    end
-    return Vector3.new(528.7, 70.57, -364.11)
-end
-
 local snapshotCache = { At = 0, List = {} }
 local function snapshot(force)
     local now = os.clock()
@@ -140,26 +112,6 @@ local function snapshot(force)
     snapshotCache.At = now
     snapshotCache.List = list
     return list
-end
-
-local function eggNow(uid, cache)
-    local node = workspace:FindFirstChild(uid)
-    local slots = workspace:FindFirstChild("AreaEggSlotsClient")
-    node = node or (slots and slots:FindFirstChild(uid))
-    if node then
-        local ok, pos = pcall(function() return node:GetPivot().Position end)
-        if ok and pos then
-            cache.Pos, cache.At = pos, os.clock()
-            return pos
-        end
-    end
-    if os.clock() - (cache.At or 0) >= 0.5 then
-        cache.At = os.clock()
-        for _, r in ipairs(snapshot(true)) do
-            if r.Uid == uid then cache.Pos = r.BottomCFrame.Position; break end
-        end
-    end
-    return cache.Pos
 end
 
 local function describe(record)
@@ -196,61 +148,60 @@ local function promptNear(pos, rad)
     return best
 end
 
--- ★ ガードの状態を検知する関数
-local function getGuardState(areaId, eggPos)
-    local guardModel = nil
-    pcall(function()
-        local areasRoot = workspace:FindFirstChild("__OBJECTS") and workspace.__OBJECTS:FindFirstChild("Areas") and workspace.__OBJECTS.Areas:FindFirstChild("GuardAreas")
-        if areasRoot and areaId then
-            local areaFolder = areasRoot:FindFirstChild(areaId)
-            if areaFolder then
-                guardModel = areaFolder:FindFirstChild("Guard") or areaFolder:FindFirstChild("ForestGuardAuthored") or areaFolder:FindFirstChildWhichIsA("Model", true)
-            end
-        end
-        if not guardModel and eggPos then
-            local nearest, nd = nil, 1e9
-            for _, m in ipairs(workspace:GetDescendants()) do
-                if m:IsA("Model") and m.Name:lower():find("guard") and m.PrimaryPart then
-                    local d = (m.PrimaryPart.Position - eggPos).Magnitude
-                    if d < nd and d < 90 then nd = d; nearest = m end
-                end
-            end
-            guardModel = nearest
-        end
-    end)
-
-    if guardModel then
-        local alert = guardModel:GetAttribute("Alert") or guardModel:GetAttribute("Alerted") or guardModel:GetAttribute("IsAlerted") or guardModel:GetAttribute("Chasing")
-        local sleeping = guardModel:GetAttribute("Sleeping") or guardModel:GetAttribute("IsSleeping") or guardModel:GetAttribute("Asleep") or guardModel:GetAttribute("Sleep")
-        local s = guardModel:GetAttribute("State")
-        if sleeping == true then return true, guardModel end
-        if alert == false or alert == nil then
-            local h = guardModel:FindFirstChildOfClass("Humanoid")
-            local hrp = guardModel.PrimaryPart or guardModel:FindFirstChild("HumanoidRootPart")
-            if hrp and (not h or h.MoveDirection.Magnitude < 0.15) then return true, guardModel end
-            if s and tostring(s):lower():find("sleep") then return true, guardModel end
-        end
-        local alertGui = guardModel:FindFirstChild("Alert", true)
-        if alertGui and alertGui:IsA("BillboardGui") and alertGui.Enabled == false then return true, guardModel end
-    end
-    return false, guardModel
-end-- ============================================================
--- Part 2/5: Movement Engine & Multi-Fire Grab
 -- ============================================================
-local function hopTo(targetPos, checkFn)
-    local cam = workspace.CurrentCamera
-    local oldCamType = cam.CameraType
-    pcall(function() cam.CameraType = Enum.CameraType.Scriptable; cam.CFrame = cam.CFrame end)
-    
+-- Clone & Camera Engine
+-- ============================================================
+local stealClone = nil
+local function dropClone()
+    if stealClone then pcall(function() stealClone:Destroy() end); stealClone = nil end
+end
+
+local function postClone()
+    dropClone()
     local character = localPlayer.Character
+    if not character then return end
+    local was = character.Archivable
+    character.Archivable = true
+    local copy = character:Clone()
+    character.Archivable = was
+    if copy then
+        for _, d in ipairs(copy:GetDescendants()) do
+            if d:IsA("LuaSourceContainer") or d:IsA("Humanoid") then
+                pcall(function() d:Destroy() end)
+            elseif d:IsA("BasePart") then
+                d.Anchored = true; d.CanCollide = false; d.CanTouch = false; d.CanQuery = false
+            end
+        end
+        copy.Name = "Clone"
+        copy.Parent = workspace
+        stealClone = copy
+    end
+end
+
+local function frozenCamera()
+    local cam = workspace.CurrentCamera
+    if not cam then return function() end end
+    local oldType, frame = cam.CameraType, cam.CFrame
+    pcall(function() cam.CameraType = Enum.CameraType.Scriptable; cam.CFrame = frame end)
+    return function() pcall(function() cam.CameraType = oldType end) end
+end
+
+local function pivotTo(pos)
+    local character = localPlayer.Character
+    local r = root()
+    if not character or not r then return end
+    local cf = CFrame.new(pos) * r.CFrame.Rotation
+    pcall(function() character:PivotTo(cf) end)
+    if (r.Position - pos).Magnitude > 3 then pcall(function() r.CFrame = cf end) end
+end-- ============================================================
+-- Part 2/5: Movement & Multi-Fire Grab
+-- ============================================================
+local function warpTo(targetPos, checkFn)
     local r = root()
     if not r then return false end
     
-    local hopGap = CFG.HopGapMin
-    local retries = 0
     local started = os.clock()
-    
-    while not state.Cancel and os.clock() - started < 60 do
+    while not state.Cancel and os.clock() - started < 30 do
         if checkFn and checkFn() then break end
         r = root()
         if not r then break end
@@ -259,7 +210,7 @@ local function hopTo(targetPos, checkFn)
         local dist = flat.Magnitude
         
         -- 最後の同期ゾーン（歩行）
-        if dist <= CFG.SyncDistance then
+        if dist <= 25 then
             local h = hum()
             local speed = h and (h.WalkSpeed * 1.15) or 16
             local v = flat.Unit * math.min(speed, dist / 0.05)
@@ -269,48 +220,28 @@ local function hopTo(targetPos, checkFn)
             end)
             task.wait(0.03)
         else
-            -- 高速ワープゾーン
-            local nextPos = r.Position + flat.Unit * CFG.HopStep + Vector3.new(0, 3, 0)
-            local pulledBefore = state.PulledAt
-            
+            -- 4500スピードでの超高速ワープ
+            local step = math.min(CFG.Speed * 0.03, dist) -- 適当なフレーム幅
+            local nextPos = r.Position + flat.Unit * step + Vector3.new(0, 3, 0)
             pcall(function()
                 r.CFrame = CFrame.new(nextPos)
                 r.AssemblyLinearVelocity = Vector3.zero
                 r.AssemblyAngularVelocity = Vector3.zero
             end)
-            
-            task.wait(hopGap)
-            
-            local check = root()
-            local pulled = state.PulledAt > pulledBefore or (check and (check.Position - nextPos).Magnitude > 30)
-            
-            if pulled then
-                retries += 1
-                hopGap = math.min(CFG.HopGapMax, hopGap + 0.01)
-                if retries > CFG.HopRetries then break end
-                task.wait(0.1)
-            else
-                hopGap = math.max(CFG.HopGapMin, hopGap - 0.001)
-            end
+            task.wait(0.03)
         end
     end
-
-    if hum() then hum():Move(Vector3.zero, false) end
-    pcall(function() cam.CameraType = oldCamType end)
     return true
 end
 
--- ★ 多重発火（プロンプト＋モジュール＋リモート）
 local function multiFireGrab(uid, pos)
     local r = root()
-    if r then
-        pcall(function() r.AssemblyLinearVelocity = Vector3.zero end)
-    end
+    if r then pcall(function() r.AssemblyLinearVelocity = Vector3.zero end) end
     
     local slotKey = nil
     local AreaEggSlotIdentity = safeRequire(function() return ReplicatedStorage.Shared.Util.AreaEggSlotIdentity end)
     if AreaEggSlotIdentity and AreaEggSlotIdentity.LooksLikeFirstAreaUid and AreaEggSlotIdentity.LooksLikeFirstAreaUid(uid) then
-        slotKey = AreaEggSlotIdentity.SlotKey("Forest", "Nest1") -- Fallback
+        slotKey = AreaEggSlotIdentity.SlotKey("Forest", "Nest1")
     end
 
     local carryRemote = remote("RF/EggWorld/AskFieldEggCarry")
@@ -330,26 +261,8 @@ local function multiFireGrab(uid, pos)
         pcall(fireproximityprompt, prompt)
     end
     end-- ============================================================
--- Part 3/5: Guard-Hit Sync & Steal Logic
+-- Part 3/5: Clone & Instant TP Steal Logic
 -- ============================================================
-local function isPlayerCarryingEgg()
-    local pg = localPlayer:FindFirstChildOfClass("PlayerGui")
-    local dropGui = pg and pg:FindFirstChild("DropHeldEgg")
-    if dropGui and dropGui.Enabled == true then return true end
-
-    local char = localPlayer.Character
-    if char then
-        for _, t in ipairs(char:GetChildren()) do
-            if t:IsA("Tool") then
-                if t:GetAttribute("Uid") ~= nil or t:GetAttribute("AssetCategory") ~= nil then return true end
-                local tName = t.Name:lower()
-                if tName:find("egg") then return true end
-            end
-        end
-    end
-    return false
-end
-
 local function stealAndDeliver(uid, retry)
     if state.Busy then return false end
     state.Busy = true
@@ -357,6 +270,12 @@ local function stealAndDeliver(uid, retry)
     local attempts = retry and CFG.MaxRetries or 1
     local succeeded = false
     
+    -- ★ 1. スチールボタンを押した瞬間の位置を記憶し、そこにクローンを配置
+    local startCFrame = root() and root().CFrame or CFrame.new(0, 100, 0)
+    postClone()
+    local releaseCamera = frozenCamera()
+    state.ReleaseCamera = releaseCamera
+
     for attempt = 1, attempts do
         if state.Cancel then break end
         local started = os.clock()
@@ -370,139 +289,49 @@ local function stealAndDeliver(uid, retry)
         local eggPos = targetRecord.BottomCFrame.Position
         
         status("卵へ移動中" .. (attempt > 1 and (" (" .. attempt .. ")") or ""))
-        hopTo(eggPos, function() return state.Cancel end)
+        warpTo(eggPos, function() return state.Cancel end)
         
         if state.Cancel then break end
 
-        -- 1. 最初の掴み（多重発火）
+        -- 2. 多重発火で掴む
         status("掴み中...")
         local tStart = os.clock()
         local carried = false
         
         while os.clock() - tStart < CFG.GrabTimeout and not state.Cancel do
             multiFireGrab(uid, eggPos)
-            task.wait(0.1)
-            if isPlayerCarryingEgg() then carried = true; break end
+            task.wait(CFG.GrabInterval)
+            if state.Carrying then carried = true; break end
         end
         
         if not carried then
             status("掴めませんでした")
         else
-            -- ★ 2. ガードヒット同期（わざと殴られてサーバーと同期する）
-            status("ガードヒット同期中...")
-            local tGuardStart = os.clock()
-            local startHealth = 100
-            local h0 = hum()
-            if h0 then startHealth = h0.Health end
-            local wasHit = false
-
-            -- 4秒間、卵を持ったままガードの近くで待つ
-            while os.clock() - tGuardStart < 4.0 and not state.Cancel do
-                if not isPlayerCarryingEgg() then wasHit = true; break end
-                local h = hum()
-                if h then
-                    local hs = h:GetState()
-                    if h.Health < startHealth - 1.5 or hs == Enum.HumanoidStateType.Physics or hs == Enum.HumanoidStateType.Ragdoll or hs == Enum.HumanoidStateType.FallingDown then
-                        wasHit = true
-                        -- ラグドール中は少し待つ
-                        local tPost = os.clock()
-                        while os.clock() - tPost < 0.85 and not state.Cancel do
-                            if not isPlayerCarryingEgg() then break end
-                            task.wait(0.05)
-                        end
-                        break
-                    end
-                end
-                task.wait(0.05)
-            end
-
-            if wasHit then
-                status("スタン解除待ち...")
-                task.wait(0.65)
-                
-                -- ラグドール解除を待つ
-                local tRag = os.clock()
-                while os.clock() - tRag < 3.2 and not state.Cancel do
-                    local h = hum()
-                    if not h then break end
-                    local hs = h:GetState()
-                    if hs ~= Enum.HumanoidStateType.Physics and hs ~= Enum.HumanoidStateType.Ragdoll and hs ~= Enum.HumanoidStateType.FallingDown then break end
-                    pcall(function() h:ChangeState(Enum.HumanoidStateType.GettingUp) end)
-                    task.wait(0.12)
-                end
-                
-                task.wait(0.35)
-                
-                -- 位置を卵の前に戻す
-                local hrpNow = root()
-                if hrpNow and (hrpNow.Position - eggPos).Magnitude > 14 then
-                    pcall(function()
-                        hrpNow.CFrame = CFrame.new(eggPos + Vector3.new(0, 1.8, 0))
-                        hrpNow.AssemblyLinearVelocity = Vector3.zero
-                        hrpNow.AssemblyAngularVelocity = Vector3.zero
-                    end)
-                    task.wait(0.35)
-                end
-
-                -- 完全に立つまで待つ
-                local tStand = os.clock()
-                while os.clock() - tStand < 1.5 and not state.Cancel do
-                    local h = hum()
-                    if h and h:GetState() ~= Enum.HumanoidStateType.Physics and h:GetState() ~= Enum.HumanoidStateType.Ragdoll then break end
-                    task.wait(0.08)
-                end
-
-                -- ガードが眠るのを待つ（再度掴むため）
-                local tGuardSleep = os.clock()
-                while os.clock() - tGuardSleep < 4.5 and not state.Cancel do
-                    local asleep = getGuardState(targetRecord.AreaId, eggPos)
-                    if asleep then break end
-                    task.wait(0.14)
-                end
-                task.wait(0.08)
-
-                -- 2回目の掴み（多重発火）
-                status("再同期掴み...")
-                local tPickup2 = os.clock()
-                local reCarried = false
-                while os.clock() - tPickup2 < 2.2 and not state.Cancel do
-                    if isPlayerCarryingEgg() then reCarried = true; break end
-                    multiFireGrab(uid, eggPos)
-                    task.wait(0.08)
-                end
-                
-                if isPlayerCarryingEgg() then reCarried = true end
-                if not reCarried then
-                    status("再掴み失敗")
-                    carried = false
-                else
-                    status("同期成功、帰還中")
-                    task.wait(0.12)
-                end
-            end
-        end
-
-        -- 3. 帰還
-        if carried and not state.Cancel then
-            status("帰還中...")
-            hopTo(homePoint(), function() return state.Delivered >= started or not state.Carrying or state.Cancel end)
+            -- ★ 3. クローンの位置へインスタントTPで帰還
+            status("インスタントTP帰還中...")
+            pivotTo(startCFrame.Position)
+            task.wait(CFG.SyncWaitTime) -- サーバー同期ウェイト
             
-            if not state.Cancel then
-                status("納品中...")
-                task.wait(0.3)
-                dropEgg()
-                local waited = 0
-                while state.Delivered < started and waited < 2 and not state.Cancel do 
-                    waited += RunService.Heartbeat:Wait() 
-                end
-                if state.Delivered >= started then 
-                    succeeded = true; status("納品完了"); break 
-                end
+            if state.Cancel then break end
+            
+            status("納品中...")
+            task.wait(0.1)
+            dropEgg()
+            local waited = 0
+            while state.Delivered < started and waited < 2 and not state.Cancel do 
+                waited += RunService.Heartbeat:Wait() 
+            end
+            if state.Delivered >= started then 
+                succeeded = true; status("納品完了"); break 
             end
         end
         
         if attempt < attempts and not state.Cancel then task.wait(1) end
     end
+    
+    -- 後片付け
+    dropClone()
+    if state.ReleaseCamera then pcall(state.ReleaseCamera); state.ReleaseCamera = nil end
     state.Busy = false
     return succeeded
 end
@@ -611,7 +440,7 @@ local title = Instance.new("TextLabel", header)
 title.Size = UDim2.new(1, -140, 0, 20)
 title.Position = UDim2.fromOffset(52, 6)
 title.BackgroundTransparency = 1
-title.Text = "SHOUYU HUB (Guard Sync)"
+title.Text = "SHOUYU HUB"
 title.TextColor3 = THEME.AccentSoft
 title.Font = Enum.Font.GothamBlack
 title.TextSize = 14
@@ -913,4 +742,4 @@ task.spawn(function()
     status("待機中")
 end)
 
-print("[ShouyuHub] 起動完了 (Guard-Hit Sync & Multi-Fire)")
+print("[ShouyuHub] 起動完了 (Clone & Instant TP)")
