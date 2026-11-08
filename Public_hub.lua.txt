@@ -23532,3 +23532,127 @@ end)
 pcall(function() local o = workspace.CurrentCamera and workspace.CurrentCamera:FindFirstChild("Skyr0FaceAway"); if o then o:Destroy() end end)
 _G.__Skyr0Stage = "complete"
 _G.__Skyr0Ready = true
+-- ============================================================
+-- shouyuhub | Monochrome Loader & UI
+-- ============================================================
+local Players = game:GetService("Players")
+local CoreGui = game:GetService("CoreGui")
+local UserInputService = game:GetService("UserInputService")
+local LocalPlayer = Players.LocalPlayer
+
+-- GitHubから元のスクリプトを読み込んで実行
+local success, err = pcall(function()
+    local url = "https://raw.githubusercontent.com/shouyu356-alt/shouyuhubfmlya/main/Public_hub.lua.txt"
+    loadstring(game:HttpGet(url))()
+end)
+if not success then
+    warn("[shouyuhub] スクリプトの読み込みに失敗: " .. tostring(err))
+end
+
+-- モノクロームUIの生成
+local guiParent = CoreGui
+if type(gethui) == "function" then
+    local ok, hui = pcall(gethui)
+    if ok and hui then guiParent = hui end
+end
+
+local screenGui = Instance.new("ScreenGui")
+screenGui.Name = "shouyuhub_UI"
+screenGui.ResetOnSpawn = false
+screenGui.IgnoreGuiInset = true
+screenGui.Parent = guiParent
+
+local mainFrame = Instance.new("Frame")
+mainFrame.Name = "Main"
+mainFrame.Size = UDim2.fromOffset(260, 220)
+mainFrame.Position = UDim2.fromOffset(20, 50)
+mainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 15)
+mainFrame.BorderSizePixel = 1
+mainFrame.BorderColor3 = Color3.fromRGB(255, 255, 255)
+mainFrame.Active = true
+mainFrame.Parent = screenGui
+Instance.new("UICorner", mainFrame).CornerRadius = UDim.new(0, 6)
+
+local titleBar = Instance.new("Frame")
+titleBar.Size = UDim2.new(1, 0, 0, 30)
+titleBar.BackgroundColor3 = Color3.fromRGB(25, 25, 25)
+titleBar.BorderSizePixel = 0
+titleBar.Parent = mainFrame
+Instance.new("UICorner", titleBar).CornerRadius = UDim.new(0, 6)
+
+local titleLabel = Instance.new("TextLabel")
+titleLabel.Size = UDim2.new(1, 0, 1, 0)
+titleLabel.BackgroundTransparency = 1
+titleLabel.Text = "SHOUYUHUB"
+titleLabel.TextColor3 = Color3.fromRGB(255, 255, 255)
+titleLabel.Font = Enum.Font.GothamBlack
+titleLabel.TextSize = 14
+titleLabel.Parent = titleBar
+
+local statusLabel = Instance.new("TextLabel")
+statusLabel.Size = UDim2.new(1, -20, 0, 20)
+statusLabel.Position = UDim2.fromOffset(10, 40)
+statusLabel.BackgroundTransparency = 1
+statusLabel.Text = "Status: Loaded"
+statusLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+statusLabel.Font = Enum.Font.Code
+statusLabel.TextSize = 11
+statusLabel.TextXAlignment = Enum.TextXAlignment.Left
+statusLabel.Parent = mainFrame
+
+local featureBtn = Instance.new("TextButton")
+featureBtn.Size = UDim2.new(1, -20, 0, 35)
+featureBtn.Position = UDim2.fromOffset(10, 70)
+featureBtn.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
+featureBtn.BorderColor3 = Color3.fromRGB(255, 255, 255)
+featureBtn.BorderSizePixel = 1
+featureBtn.Text = "EXECUTE MAIN FEATURE"
+featureBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+featureBtn.Font = Enum.Font.GothamBold
+featureBtn.TextSize = 12
+featureBtn.Parent = mainFrame
+Instance.new("UICorner", featureBtn).CornerRadius = UDim.new(0, 4)
+
+local closeBtn = Instance.new("TextButton")
+closeBtn.Size = UDim2.new(1, -20, 0, 25)
+closeBtn.Position = UDim2.fromOffset(10, 115)
+closeBtn.BackgroundColor3 = Color3.fromRGB(50, 50, 50)
+closeBtn.Text = "CLOSE UI"
+closeBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+closeBtn.Font = Enum.Font.GothamBold
+closeBtn.TextSize = 11
+closeBtn.Parent = mainFrame
+Instance.new("UICorner", closeBtn).CornerRadius = UDim.new(0, 4)
+
+-- UIのドラッグ機能
+local dragging, dragStart, startPos
+titleBar.InputBegan:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+        dragging = true
+        dragStart = input.Position
+        startPos = mainFrame.Position
+        input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.End then
+                dragging = false
+            end
+        end)
+    end
+end)
+UserInputService.InputChanged:Connect(function(input)
+    if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+        local delta = input.Position - dragStart
+        mainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+    end
+end)
+
+-- ボタンの機能
+closeBtn.MouseButton1Click:Connect(function()
+    screenGui:Destroy()
+end)
+
+featureBtn.MouseButton1Click:Connect(function()
+    statusLabel.Text = "Status: Executing..."
+    task.wait(0.5)
+    -- ここに特定の機能を追加できます。例: _G.Skyr0SyncModule() を呼び出すなど
+    statusLabel.Text = "Status: Done"
+end)
