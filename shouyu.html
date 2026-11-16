@@ -1,0 +1,226 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>shouyuhub 変換 + Anti-Lag 注入</title>
+<style>
+    body { background: #0c1014; color: #ebf5fa; font-family: sans-serif; padding: 20px; text-align: center; }
+    h1 { color: #22d3ee; }
+    button { padding: 15px 30px; font-size: 18px; background: linear-gradient(90deg, #22d3ee, #38bdf8); color: #0c1014; border: none; border-radius: 10px; font-weight: bold; margin: 10px; cursor: pointer; }
+    button:hover { filter: brightness(1.15); }
+    input[type="file"] { display: none; }
+    .custom-file-upload { border: 2px dashed #22d3ee; display: inline-block; padding: 20px 40px; cursor: pointer; border-radius: 10px; margin-bottom: 20px; color: #22d3ee; }
+    .note { color: #8c9eaf; font-size: 13px; max-width: 600px; margin: 20px auto; line-height: 1.6; }
+    .badge { display: inline-block; background: #1a2028; border: 1px solid #2a3642; border-radius: 8px; padding: 8px 16px; margin: 4px; font-size: 12px; color: #8c9eaf; }
+</style>
+</head>
+<body>
+    <h1>⚡ shouyuhub 変換 + Anti-Lag 注入 ⚡</h1>
+    <p>元のスクリプト（.txt / .lua）を選択してください</p>
+
+    <label class="custom-file-upload">
+        <input type="file" id="fileInput" accept=".txt,.lua" />
+        📁 ファイルを選択
+    </label>
+    <p id="fileName">未選択</p>
+
+    <button onclick="convertFile()">変換 + 注入してダウンロード</button>
+
+    <div class="note">
+        <div class="badge">UI名 → shouyu hub</div>
+        <div class="badge">見た目は変更なし</div>
+        <div class="badge">レインボーなし</div>
+        <div class="badge">Anti-Lag / FPS Boost 注入</div>
+        <br><br>
+        置換対象のHub名はスクリプト内の<code>RENAME</code>配列で追加できます。
+    </div>
+
+<script>
+// ============================================================
+// Anti-Lag / FPS Boost モジュール（末尾に注入）
+// ============================================================
+const ANTILAG = String.raw`
+-- ============================================================
+-- SHOUYU ANTI-LAG / FPS BOOST (auto-injected)
+-- ============================================================
+do
+    local _shAL = {}
+    _shAL.enabled = true
+    _shAL.interval = 0.5
+    _shAL.applied = setmetatable({}, {__mode = "k"})
+
+    local _L = game:GetService("Lighting")
+    local _W = game:GetService("Workspace")
+    local _RS = game:GetService("RunService")
+    local _PS = game:GetService("Players")
+    local _LP = _PS.LocalPlayer
+    local _Terrain = _W:FindFirstChildOfClass("Terrain")
+
+    local function isProtected(inst)
+        local char = _LP.Character
+        if char and inst:IsDescendantOf(char) then return true end
+        local bp = _LP:FindFirstChild("Backpack")
+        if bp and inst:IsDescendantOf(bp) then return true end
+        for _, pl in ipairs(_PS:GetPlayers()) do
+            if pl.Character and inst:IsDescendantOf(pl.Character) then return true end
+        end
+        return false
+    end
+
+    local function optimizeLighting()
+        pcall(function()
+            if settings and settings().Rendering then
+                settings().Rendering.QualityLevel = Enum.QualityLevel.Level01
+            end
+            _L.GlobalShadows = false
+            _L.FogEnd = 9e9
+            _L.Brightness = 1
+            _L.EnvironmentDiffuseScale = 0
+            _L.EnvironmentSpecularScale = 0
+            for _, e in ipairs(_L:GetChildren()) do
+                if e:IsA("PostEffect") or e:IsA("Atmosphere") or e:IsA("Sky") or e:IsA("Clouds") then
+                    pcall(function() e:Destroy() end)
+                end
+            end
+        end)
+    end
+
+    local function optimizeTerrain()
+        if not _Terrain then return end
+        pcall(function()
+            _Terrain.WaterWaveSize = 0
+            _Terrain.WaterWaveSpeed = 0
+            _Terrain.WaterReflectance = 0
+            _Terrain.WaterTransparency = 1
+            if sethiddenproperty then
+                pcall(function() sethiddenproperty(_Terrain, "Decoration", false) end)
+            end
+        end)
+    end
+
+    local function stripPart(obj)
+        if _shAL.applied[obj] then return end
+        if isProtected(obj) then return end
+        pcall(function()
+            if obj:IsA("BasePart") then
+                obj.Material = Enum.Material.SmoothPlastic
+                obj.CastShadow = false
+                obj.Reflectance = 0
+            elseif obj:IsA("Decal") or obj:IsA("Texture") or obj:IsA("SurfaceAppearance") then
+                obj:Destroy()
+            elseif obj:IsA("ParticleEmitter") or obj:IsA("Trail") or obj:IsA("Beam")
+                or obj:IsA("Smoke") or obj:IsA("Fire") or obj:IsA("Sparkles") or obj:IsA("Highlight") then
+                obj.Enabled = false
+                obj:Destroy()
+            elseif obj:IsA("Explosion") then
+                obj.Visible = false
+            end
+            _shAL.applied[obj] = true
+        end)
+    end
+
+    local function scanAll()
+        for _, d in ipairs(_W:GetDescendants()) do
+            stripPart(d)
+        end
+    end
+
+    local function watchNew()
+        _W.DescendantAdded:Connect(function(obj)
+            if not _shAL.enabled then return end
+            stripPart(obj)
+        end)
+    end
+
+    local function reapplyLoop()
+        task.spawn(function()
+            while _shAL.enabled do
+                task.wait(_shAL.interval)
+                pcall(optimizeLighting)
+                pcall(optimizeTerrain)
+            end
+        end)
+    end
+
+    optimizeLighting()
+    optimizeTerrain()
+    task.spawn(scanAll)
+    watchNew()
+    reapplyLoop()
+
+    local env = (getgenv and getgenv()) or _G
+    if type(env) == "table" then
+        env.ShouyuAntiLag = _shAL
+    end
+    print("[SHOUYU] Anti-Lag / FPS Boost injected")
+end
+`;
+
+// ============================================================
+// UI名 改名リスト（UIは触らない、名前だけ）
+// ============================================================
+const RENAME = [
+    ['"Harion Enchantments - https://discord.gg/harion"', '"shouyu hub"'],
+    ['"Harion Enchantments"', '"shouyu hub"'],
+    ['"Harion Rage"', '"shouyu Rage"'],
+    ['"Harion enhancement"', '"shouyu 拡張"'],
+    ['"Custom Hub"', '"shouyu hub"'],
+    ['"CustomHubGUI"', '"ShouyuHubGUI"'],
+    ['CustomHubGUI', 'ShouyuHubGUI'],
+    ['[Modern Client]', '[shouyu hub]'],
+    ['[Overlay]', '[shouyu hub]'],
+    ['Modern Client', 'shouyu hub'],
+    ['"bored hub"', '"shouyu hub"'],
+    ['Bored Hub', 'shouyu hub'],
+    ['RivalsNativeHub', 'ShouyuNativeHub'],
+    ['BoredHubGui', 'ShouyuHubGui'],
+    ['BoredHubConfigs', 'ShouyuHubConfigs'],
+    ['BoredHub', 'ShouyuHub']
+];
+
+document.getElementById('fileInput').addEventListener('change', function(e) {
+    if (e.target.files.length > 0) {
+        document.getElementById('fileName').innerText = e.target.files[0].name;
+    }
+});
+
+function convertFile() {
+    const file = document.getElementById('fileInput').files[0];
+    if (!file) {
+        alert('ファイルを選択してください！');
+        return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        let c = e.target.result;
+
+        // ① UI名だけ改名（見た目はそのまま）
+        for (let i = 0; i < RENAME.length; i++) {
+            c = c.split(RENAME[i][0]).join(RENAME[i][1]);
+        }
+
+        // ② 末尾にAnti-Lag注入（既に注入済みならスキップ）
+        if (!c.includes('SHOUYU ANTI-LAG / FPS BOOST')) {
+            if (!c.endsWith('\n')) c += '\n';
+            c += ANTILAG;
+        }
+
+        // ③ ダウンロード
+        const blob = new Blob([c], { type: 'text/plain' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'shouyuhub_antilag.txt';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+
+        alert('🎉 変換完了！shouyuhub_antilag.txt がダウンロードされました。');
+    };
+    reader.readAsText(file);
+}
+</script>
+</body>
+</html>
